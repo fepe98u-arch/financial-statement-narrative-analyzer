@@ -1,0 +1,14 @@
+PySide6
+polars
+rapidfuzz
+pytest
+SQLAlchemy
+psycopg[binary]
+numpy
+scikit-learn
+requests
+
+# Optional, heavy (pulls in PyTorch, ~1-2GB): only needed for Phase 6 Local
+# Embedding/RAG. Install separately when you're ready:
+#   .venv\Scripts\python.exe -m pip install sentence-transformers
+# sentence-transformers

@@ -1,0 +1,165 @@
+"""Evidence Analysis page (PROJECT_SPEC.md sections 27-31, 42).
+
+Degrades exactly per section 41-42: if no local model is configured (or
+sentence-transformers isn't installed), the page shows the required
+"Local AI model is not installed." message and lets the user browse to a
+local model folder — it never tries to download one itself.
+"""
+from __future__ import annotations
+
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
+
+from app.analysis.embedding_engine import LocalModelNotInstalledError, load_model
+from app.analysis.evidence_ranking import EvidenceClassification, rank_public_evidence
+from app.analysis.investigation_questions import generate_investigation_questions
+from app.analysis.narrative_patterns import detect_narrative_patterns
+from app.analysis.relationship_rules import detect_relationship_rules
+from app.config import get_local_ai_model_path, set_local_ai_model_path
+from app.data.loader import list_companies, load_financial_facts, to_year_map
+from app.data.synthetic_public_documents import documents_for_company
+
+LATEST, PRIOR = 2026, 2025
+
+CLASSIFICATION_COLORS = {
+    EvidenceClassification.POSSIBLE: "#1565c0",
+    EvidenceClassification.NO_EVIDENCE_FOUND: "#757575",
+}
+
+
+class EvidenceAnalysisPage(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self._facts = load_financial_facts()
+        self._companies = list_companies(self._facts)
+        self._model = None
+
+        outer = QVBoxLayout(self)
+
+        model_row = QHBoxLayout()
+        self._model_status = QLabel()
+        model_row.addWidget(self._model_status)
+        choose_btn = QPushButton("모델 폴더 선택...")
+        choose_btn.clicked.connect(self._choose_model_folder)
+        model_row.addWidget(choose_btn)
+        model_row.addStretch()
+        outer.addLayout(model_row)
+
+        header = QHBoxLayout()
+        header.addWidget(QLabel("회사:"))
+        self._company_combo = QComboBox()
+        self._company_combo.addItems(self._companies)
+        self._company_combo.currentTextChanged.connect(self._render)
+        header.addWidget(self._company_combo)
+        header.addStretch()
+        outer.addLayout(header)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self._content = QWidget()
+        self._content_layout = QVBoxLayout(self._content)
+        scroll.setWidget(self._content)
+        outer.addWidget(scroll)
+
+        self._load_model_if_configured()
+        self._render(self._companies[0])
+
+    def _load_model_if_configured(self) -> None:
+        path = get_local_ai_model_path()
+        try:
+            self._model = load_model(path) if path else None
+            if self._model is not None:
+                self._model_status.setText(f"\U0001f7e2 Local AI model loaded ({path})")
+                self._model_status.setStyleSheet("color: #1b5e20; font-weight: bold;")
+                return
+        except LocalModelNotInstalledError:
+            self._model = None
+
+        self._model_status.setText("\U0001f534 Local AI model is not installed.")
+        self._model_status.setStyleSheet("color: #b71c1c; font-weight: bold;")
+
+    def _choose_model_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Local Embedding Model 폴더 선택")
+        if not folder:
+            return
+        set_local_ai_model_path(folder)
+        self._load_model_if_configured()
+        self._render(self._company_combo.currentText())
+
+    def _clear_content(self) -> None:
+        while self._content_layout.count():
+            item = self._content_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _render(self, company: str) -> None:
+        self._clear_content()
+
+        if self._model is None:
+            self._content_layout.addWidget(
+                QLabel(
+                    "Local AI 모델이 없어 Semantic Search/Evidence Ranking을 사용할 수 없습니다.\n"
+                    "위의 '모델 폴더 선택'으로 로컬에 준비된 sentence-transformers 모델 폴더를 지정하세요.\n"
+                    "(모델은 자동으로 다운로드되지 않습니다 — PROJECT_SPEC.md 섹션 42)"
+                )
+            )
+            self._content_layout.addStretch()
+            return
+
+        year_map = to_year_map(self._facts, company)
+        narrative_hits = detect_narrative_patterns(year_map, LATEST, PRIOR)
+        rule_hits = detect_relationship_rules(year_map, LATEST, PRIOR)
+        question_sets = generate_investigation_questions(narrative_hits, rule_hits)
+        documents = documents_for_company(company)
+
+        if not question_sets:
+            self._content_layout.addWidget(QLabel("현재 조사 질문이 없어 매칭할 대상이 없습니다."))
+        if not documents:
+            self._content_layout.addWidget(QLabel("이 회사에 대한 공개자료 예시가 없습니다."))
+
+        for qs in question_sets[:2]:  # keep the page readable — top 2 pattern sources
+            for question in qs.questions[:1]:  # one representative question per source
+                self._content_layout.addWidget(self._question_header(question))
+                matches = rank_public_evidence(self._model, question, documents, top_k=3)
+                for match in matches:
+                    self._content_layout.addWidget(self._evidence_card(match))
+
+        self._content_layout.addStretch()
+
+    def _question_header(self, question: str) -> QLabel:
+        label = QLabel(f"Investigation Question: {question}")
+        label.setStyleSheet(
+            "font-weight: bold; background-color: #eeeeee; padding: 6px;"
+            " border-radius: 4px; margin-top: 10px;"
+        )
+        label.setWordWrap(True)
+        return label
+
+    def _evidence_card(self, match) -> QFrame:
+        frame = QFrame()
+        accent = CLASSIFICATION_COLORS.get(match.classification, "#757575")
+        frame.setStyleSheet(
+            f"QFrame {{ border-left: 4px solid {accent}; padding: 8px; margin: 4px 0; }}"
+        )
+        layout = QVBoxLayout(frame)
+        title = QLabel(f"[{match.classification.value}] {match.title}  (유사도 {match.similarity:.3f})")
+        title.setStyleSheet("font-weight: bold;")
+        title.setWordWrap(True)
+        layout.addWidget(title)
+        meta = QLabel(f"{match.source} · {match.published_at}")
+        meta.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(meta)
+        snippet = QLabel(match.chunk.text)
+        snippet.setWordWrap(True)
+        layout.addWidget(snippet)
+        return frame
