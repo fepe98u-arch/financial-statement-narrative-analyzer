@@ -14,9 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.analysis.metrics_engine import compute_all_metrics
-from app.data.loader import list_companies, load_financial_facts, to_year_map
-
-LATEST, PRIOR = 2026, 2025
+from app.data.loader import list_companies, load_financial_facts, to_year_map, years_for_company
 
 
 class FinancialTrendPage(QWidget):
@@ -36,12 +34,9 @@ class FinancialTrendPage(QWidget):
         header.addStretch()
         layout.addLayout(header)
 
-        note = QLabel(
-            f"{PRIOR}→{LATEST} 계산 가능한 지표만 표시됩니다. 필요한 계정이 없으면 "
-            "임의로 추정하지 않고 해당 지표를 생략합니다."
-        )
-        note.setStyleSheet("color: #555; margin: 4px 0 8px 0;")
-        layout.addWidget(note)
+        self._note = QLabel()
+        self._note.setStyleSheet("color: #555; margin: 4px 0 8px 0;")
+        layout.addWidget(self._note)
 
         self._table = QTableWidget()
         self._table.verticalHeader().setVisible(False)
@@ -52,8 +47,21 @@ class FinancialTrendPage(QWidget):
         self._render(self._companies[0])
 
     def _render(self, company: str) -> None:
+        years = years_for_company(self._facts, company)
+        if len(years) < 2:
+            self._note.setText("이 회사는 연도가 2개 미만이라 증감률/비율을 계산할 수 없습니다.")
+            self._table.setRowCount(0)
+            self._table.setColumnCount(0)
+            return
+
+        latest, prior = years[-1], years[-2]
+        self._note.setText(
+            f"{prior}→{latest} 계산 가능한 지표만 표시됩니다. 필요한 계정이 없으면 "
+            "임의로 추정하지 않고 해당 지표를 생략합니다."
+        )
+
         year_map = to_year_map(self._facts, company)
-        metrics = compute_all_metrics(year_map, LATEST, PRIOR)
+        metrics = compute_all_metrics(year_map, latest, prior)
 
         self._table.setRowCount(len(metrics))
         self._table.setColumnCount(3)

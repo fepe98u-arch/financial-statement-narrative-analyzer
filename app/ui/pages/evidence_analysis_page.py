@@ -25,10 +25,8 @@ from app.analysis.investigation_questions import generate_investigation_question
 from app.analysis.narrative_patterns import detect_narrative_patterns
 from app.analysis.relationship_rules import detect_relationship_rules
 from app.config import get_local_ai_model_path, set_local_ai_model_path
-from app.data.loader import list_companies, load_financial_facts, to_year_map
+from app.data.loader import list_companies, load_financial_facts, to_year_map, years_for_company
 from app.data.synthetic_public_documents import documents_for_company
-
-LATEST, PRIOR = 2026, 2025
 
 CLASSIFICATION_COLORS = {
     EvidenceClassification.POSSIBLE: "#1565c0",
@@ -116,9 +114,16 @@ class EvidenceAnalysisPage(QWidget):
             self._content_layout.addStretch()
             return
 
+        years = years_for_company(self._facts, company)
+        if len(years) < 2:
+            self._content_layout.addWidget(QLabel("이 회사는 연도가 2개 미만이라 조사 질문을 생성할 수 없습니다."))
+            self._content_layout.addStretch()
+            return
+
+        latest, prior = years[-1], years[-2]
         year_map = to_year_map(self._facts, company)
-        narrative_hits = detect_narrative_patterns(year_map, LATEST, PRIOR)
-        rule_hits = detect_relationship_rules(year_map, LATEST, PRIOR)
+        narrative_hits = detect_narrative_patterns(year_map, latest, prior)
+        rule_hits = detect_relationship_rules(year_map, latest, prior)
         question_sets = generate_investigation_questions(narrative_hits, rule_hits)
         documents = documents_for_company(company)
 

@@ -20,11 +20,9 @@ from PySide6.QtWidgets import (
 
 from app.analysis.narrative_patterns import detect_narrative_patterns
 from app.analysis.relationship_rules import detect_relationship_rules
-from app.data.loader import list_companies, load_financial_facts, to_year_map
+from app.data.loader import list_companies, load_financial_facts, to_year_map, years_for_company
 from app.db.connection import CloudDatabaseNotAllowedError, build_engine, get_database_url
 from app.db.repository import PatternReviewStatus, check_connection, get_latest_human_reviews, init_schema, save_human_review
-
-LATEST, PRIOR = 2026, 2025
 
 
 class HumanReviewPage(QWidget):
@@ -105,9 +103,16 @@ class HumanReviewPage(QWidget):
         self._update_status_label()
         self._clear_content()
 
+        years = years_for_company(self._facts, company)
+        if len(years) < 2:
+            self._content_layout.addWidget(QLabel("이 회사는 연도가 2개 미만이라 리뷰할 Pattern이 없습니다."))
+            self._content_layout.addStretch()
+            return
+
+        latest, prior = years[-1], years[-2]
         year_map = to_year_map(self._facts, company)
-        narrative_hits = detect_narrative_patterns(year_map, LATEST, PRIOR)
-        rule_hits = detect_relationship_rules(year_map, LATEST, PRIOR)
+        narrative_hits = detect_narrative_patterns(year_map, latest, prior)
+        rule_hits = detect_relationship_rules(year_map, latest, prior)
 
         existing_reviews = {}
         if self._connected:

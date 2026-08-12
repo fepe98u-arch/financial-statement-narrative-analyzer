@@ -10,3 +10,7 @@ app_settings.json
 models/
 build/
 dist/
+
+# User-imported financial statements. May contain real client data —
+# never committed, regardless of what data ends up in it.
+data/imported/

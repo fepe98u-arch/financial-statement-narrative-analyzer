@@ -7,6 +7,7 @@ psycopg[binary]
 numpy
 scikit-learn
 requests
+fastexcel
 
 # Phase 6 Local Embedding/RAG. Heavy (pulls in PyTorch, ~1-2GB).
 sentence-transformers

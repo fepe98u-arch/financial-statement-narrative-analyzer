@@ -1,8 +1,10 @@
 """Desktop shell: security status bar + left sidebar navigation + pages.
 
-Sidebar items follow PROJECT_SPEC.md section 45. No network code lives here
-or anywhere in the project yet — Public Data Collection stays OFF until
-Phase 7+ builds the isolated `public_data_collector/` module.
+Sidebar items follow PROJECT_SPEC.md section 45. The only network code in
+the project lives in the isolated `app/public_data_collector/` module and
+only runs when a user explicitly triggers a fetch — nothing here
+auto-connects, so the status bar's "PUBLIC DATA COLLECTION: OFF" is always
+accurate on startup.
 """
 from __future__ import annotations
 
@@ -28,13 +30,14 @@ from app.ui.pages.human_review_page import HumanReviewPage
 from app.ui.pages.investigation_questions_page import InvestigationQuestionsPage
 from app.ui.pages.placeholder_page import PlaceholderPage
 from app.ui.pages.public_data_page import PublicDataPage
+from app.ui.pages.statement_import_page import StatementImportPage
 
 # (sidebar label, page factory) — matches PROJECT_SPEC.md section 45 order.
 # Anything not implemented yet renders as a clearly-labeled placeholder
 # instead of pretending to exist.
 SIDEBAR_PAGES: list[tuple[str, callable]] = [
     ("Dashboard", DashboardPage),
-    ("재무제표 불러오기", lambda: PlaceholderPage("재무제표 불러오기", "Excel/CSV 업로드 — 향후 단계에서 구현 예정")),
+    ("재무제표 불러오기", StatementImportPage),
     ("Account Mapping", AccountMappingPage),
     ("Financial Trend", FinancialTrendPage),
     ("Attention Patterns", AttentionPatternsPage),

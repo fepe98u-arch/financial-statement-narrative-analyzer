@@ -18,9 +18,7 @@ from PySide6.QtWidgets import (
 
 from app.analysis.narrative_patterns import detect_narrative_patterns
 from app.analysis.relationship_rules import detect_relationship_rules
-from app.data.loader import list_companies, load_financial_facts, to_year_map
-
-LATEST, PRIOR = 2026, 2025
+from app.data.loader import list_companies, load_financial_facts, to_year_map, years_for_company
 
 
 def _card(title: str, subtitle: str, body: str, accent: str) -> QFrame:
@@ -79,9 +77,16 @@ class AttentionPatternsPage(QWidget):
 
     def _render(self, company: str) -> None:
         self._clear_content()
+        years = years_for_company(self._facts, company)
+        if len(years) < 2:
+            self._content_layout.addWidget(QLabel("이 회사는 연도가 2개 미만이라 패턴을 계산할 수 없습니다."))
+            self._content_layout.addStretch()
+            return
+
+        latest, prior = years[-1], years[-2]
         year_map = to_year_map(self._facts, company)
 
-        narrative_hits = detect_narrative_patterns(year_map, LATEST, PRIOR)
+        narrative_hits = detect_narrative_patterns(year_map, latest, prior)
         section = QLabel(f"Business Narrative Pattern ({len(narrative_hits)}건)")
         section.setStyleSheet("font-weight: bold; font-size: 14px; margin-top: 6px;")
         self._content_layout.addWidget(section)
@@ -102,7 +107,7 @@ class AttentionPatternsPage(QWidget):
                 )
             )
 
-        rule_hits = detect_relationship_rules(year_map, LATEST, PRIOR)
+        rule_hits = detect_relationship_rules(year_map, latest, prior)
         section2 = QLabel(f"Relationship Rule — Attention Pattern ({len(rule_hits)}건)")
         section2.setStyleSheet("font-weight: bold; font-size: 14px; margin-top: 16px;")
         self._content_layout.addWidget(section2)

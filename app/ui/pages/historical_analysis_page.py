@@ -15,9 +15,13 @@ from PySide6.QtWidgets import (
 )
 
 from app.analysis.historical_patterns import HistoricalClassification, classify_all_accounts
-from app.data.loader import account_name_map, list_companies, load_financial_facts, to_year_map
-
-YEARS = [2022, 2023, 2024, 2025, 2026]
+from app.data.loader import (
+    account_name_map,
+    list_companies,
+    load_financial_facts,
+    to_year_map,
+    years_for_company,
+)
 
 CLASSIFICATION_COLORS = {
     HistoricalClassification.INTENSIFIED_PATTERN: QColor("#c62828"),
@@ -45,11 +49,9 @@ class HistoricalAnalysisPage(QWidget):
         header.addStretch()
         layout.addLayout(header)
 
-        note = QLabel(
-            f"당기({YEARS[-1]}) YoY를 {YEARS[1]}~{YEARS[-2]} 각 연도 자체 변동과 비교해 분류합니다."
-        )
-        note.setStyleSheet("color: #555; margin: 4px 0 8px 0;")
-        layout.addWidget(note)
+        self._note = QLabel()
+        self._note.setStyleSheet("color: #555; margin: 4px 0 8px 0;")
+        layout.addWidget(self._note)
 
         self._table = QTableWidget()
         self._table.verticalHeader().setVisible(False)
@@ -60,13 +62,22 @@ class HistoricalAnalysisPage(QWidget):
         self._render(self._companies[0])
 
     def _render(self, company: str) -> None:
+        years = years_for_company(self._facts, company)
+        if len(years) < 2:
+            self._note.setText("이 회사는 연도가 2개 미만이라 과거 패턴과 비교할 수 없습니다.")
+            self._table.setRowCount(0)
+            self._table.setColumnCount(0)
+            return
+
+        self._note.setText(f"당기({years[-1]}) YoY를 {years[0]}~{years[-2]} 각 연도 자체 변동과 비교해 분류합니다.")
+
         year_map = to_year_map(self._facts, company)
         names = account_name_map(self._facts, company)
-        results = classify_all_accounts(year_map, names, YEARS)
+        results = classify_all_accounts(year_map, names, years)
         results.sort(key=lambda r: abs(r.current_growth), reverse=True)
 
-        history_years = YEARS[1:-1]
-        columns = ["account"] + [f"{y} YoY" for y in history_years] + [f"{YEARS[-1]} YoY (당기)", "분류"]
+        history_years = years[1:-1]
+        columns = ["account"] + [f"{y} YoY" for y in history_years] + [f"{years[-1]} YoY (당기)", "분류"]
 
         self._table.setRowCount(len(results))
         self._table.setColumnCount(len(columns))

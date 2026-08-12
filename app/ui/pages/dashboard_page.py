@@ -56,7 +56,8 @@ class DashboardPage(QWidget):
 
     def _render(self, company: str) -> None:
         table_df, years = build_dashboard_table(self._facts, company)
-        self._title.setText(f"{company} — {years[0]}~{years[-1]} (Synthetic Data)")
+        year_range = f"{years[0]}" if len(years) == 1 else f"{years[0]}~{years[-1]}"
+        self._title.setText(f"{company} — {year_range}")
 
         columns = ["account_name"] + [str(y) for y in years] + ["yoy_pct"]
         headers = ["계정"] + [str(y) for y in years] + [f"{years[-1]} YoY %"]
@@ -70,6 +71,8 @@ class DashboardPage(QWidget):
                 value = row[col]
                 if col == "account_name":
                     text = str(value)
+                elif value is None:
+                    text = "-"
                 elif col == "yoy_pct":
                     text = f"{value:+.1f}%"
                 else:
