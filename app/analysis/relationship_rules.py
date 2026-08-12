@@ -14,8 +14,11 @@ from app.analysis.metrics_engine import YearMap, growth_rate
 # below.
 NOTABLE_GROWTH_PCT = 5.0
 # How many percentage points faster one account must grow than another to
-# count as "훨씬 더 빠르게" (much faster).
-FASTER_MARGIN_PP = 10.0
+# count as "훨씬 더 빠르게" (much faster). Tuned down from 10 after real
+# Yuhan Corp data (매출 +5.7%, 매출채권 +14.0% — a 8.3pp gap) showed 10pp
+# was too conservative to flag a receivables-growing-faster-than-sales case
+# worth a reviewer's attention.
+FASTER_MARGIN_PP = 5.0
 # A companion account (depreciation, interest) growing at less than this
 # fraction of the driving account's growth counts as "변화가 미미함/작음".
 SMALL_CHANGE_FRACTION = 1.0 / 3.0
