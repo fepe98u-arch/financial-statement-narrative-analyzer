@@ -60,6 +60,18 @@ EXCLUDE_OPTION = "(제외 - 가져오지 않음)"
 # concepts. Always require a human to actively pick a FUZZY suggestion.
 AUTO_ACCEPT_METHODS = (MappingMethod.EXACT, MappingMethod.ACCOUNT_DICTIONARY)
 
+# rapidfuzz's WRatio scores a pure substring match (one string entirely
+# contained in the other, e.g. "장기차입금의 상환" vs "장기차입금") via a
+# discounted partial-ratio path that lands on *exactly* 90.0 — every false
+# positive found against real Samsung/Yuhan data ("장기차입금의 차입",
+# "계속영업이익(손실)", "기타" -> 매출채권, ...) scored precisely 90.0. Real
+# near-synonyms that aren't pure substrings ("영업활동으로 인한
+# 현금흐름", "영업활동 현금흐름") scored 92-94. So: only auto-accept a
+# FUZZY match strictly above that 90.0 ceiling — it's an empirical
+# threshold, not a principled one, so the mapping table still shows every
+# FUZZY match (with its score) for manual override either way.
+FUZZY_AUTO_ACCEPT_MIN_CONFIDENCE = 90.0
+
 
 def _should_auto_accept(group) -> bool:
     """A confident name match still isn't enough on its own — the same
@@ -67,9 +79,12 @@ def _should_auto_accept(group) -> bool:
     the income statement, the cash-flow reconciliation, AND the statement
     of changes in equity), so this only pre-selects a match when it's also
     coming from the statement section that account is expected to live in.
-    File imports carry no section info (sj_div == "") and skip this check
+    File imports carry no section info (sj_div == "") and skip that check
     entirely, matching their pre-DART behavior."""
-    if group.mapping.mapping_method not in AUTO_ACCEPT_METHODS:
+    method = group.mapping.mapping_method
+    if method not in AUTO_ACCEPT_METHODS and not (
+        method == MappingMethod.FUZZY and group.mapping.mapping_confidence > FUZZY_AUTO_ACCEPT_MIN_CONFIDENCE
+    ):
         return False
     if not group.sj_div:
         return True

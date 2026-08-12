@@ -75,8 +75,13 @@ PREFERRED_STATEMENT_SECTIONS: dict[str, tuple[str, ...]] = {
     "COGS": ("IS", "CIS"),
     "OPERATING_PROFIT": ("IS", "CIS"),
     "NET_INCOME": ("IS", "CIS"),
-    "DEPRECIATION": ("IS", "CIS"),
-    "INTEREST_EXPENSE": ("IS", "CIS"),
+    # Both of these routinely show up a second time in the cash-flow
+    # statement (depreciation as a non-cash addback, interest as a
+    # supplemental "이자비용/이자지급액" disclosure) — real filings from
+    # both Samsung and Yuhan reported them there, not just in the income
+    # statement.
+    "DEPRECIATION": ("IS", "CIS", "CF"),
+    "INTEREST_EXPENSE": ("IS", "CIS", "CF"),
     "RECEIVABLE": ("BS",),
     "INVENTORY": ("BS",),
     "STRUCTURE": ("BS",),

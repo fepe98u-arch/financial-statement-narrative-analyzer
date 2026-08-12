@@ -216,11 +216,9 @@ class PublicDataPage(QWidget):
             self._real_fetch_btn.setEnabled(True)
 
         self._real_status_label.setText(
-            f"🌐 PUBLIC DATA COLLECTION: IDLE — 실제 기사 {len(results)}건 수집 완료 (회사명만 전송됨)"
+            f"🌐 PUBLIC DATA COLLECTION: IDLE — 실제 기사 {len(results)}건 수집 완료 (회사명만 전송됨). "
+            "아래에는 이 중 조사 질문과 관련도 높은 기사만 표시됩니다."
         )
-
-        for r in results:
-            self._real_results_layout.addWidget(self._article_card(r["title"], r["source"], r["published_at"], r["url"]))
 
         self._render_relevance_ranking(company, results)
 
@@ -242,47 +240,54 @@ class PublicDataPage(QWidget):
 
         years = years_for_company(self._facts, company)
         if len(years) < 2:
+            note = QLabel("이 회사는 연도가 2개 미만이라 조사 질문을 생성할 수 없습니다.")
+            note.setStyleSheet("color: #777; margin-top: 8px;")
+            self._real_results_layout.addWidget(note)
             return
+
         latest, prior = years[-1], years[-2]
         year_map = to_year_map(self._facts, company)
         narrative_hits = detect_narrative_patterns(year_map, latest, prior)
         rule_hits = detect_relationship_rules(year_map, latest, prior)
         question_sets = generate_investigation_questions(narrative_hits, rule_hits)
         if not question_sets:
+            note = QLabel(
+                "이 회사에서 현재 탐지된 Attention Pattern이 없어 조사 질문이 생성되지 않았습니다 "
+                "(Attention Patterns 화면에서 직접 확인해 보세요 — 가져온 계정 수가 적으면 "
+                "패턴이 안 잡힐 수 있습니다)."
+            )
+            note.setWordWrap(True)
+            note.setStyleSheet("color: #777; margin-top: 8px;")
+            self._real_results_layout.addWidget(note)
             return
 
-        question = question_sets[0].questions[0]
-        header = QLabel(f"Investigation Question: {question}  (로컬 임베딩으로만 판단, 외부 전송 없음)")
-        header.setWordWrap(True)
-        header.setStyleSheet(
-            "font-weight: bold; background-color: #eeeeee; padding: 6px; border-radius: 4px; margin-top: 12px;"
-        )
-        self._real_results_layout.addWidget(header)
-
         documents = documents_from_provider_results(results)
-        for match in rank_public_evidence(model, question, documents, top_k=5):
-            card = QFrame()
-            card.setStyleSheet("QFrame { border-left: 4px solid #1565c0; padding: 8px; margin: 4px 0; }")
-            card_layout = QVBoxLayout(card)
-            title = QLabel(f"[{match.classification.value}] {match.title}  (유사도 {match.similarity:.3f})")
-            title.setStyleSheet("font-weight: bold;")
-            title.setWordWrap(True)
-            card_layout.addWidget(title)
-            snippet = QLabel(match.chunk.text)
-            snippet.setWordWrap(True)
-            card_layout.addWidget(snippet)
-            self._real_results_layout.addWidget(card)
 
-    def _article_card(self, title: str, source: str, published_at: str, url: str) -> QFrame:
-        frame = QFrame()
-        frame.setStyleSheet("QFrame { border-left: 4px solid #2e7d32; padding: 6px; margin: 3px 0; }")
-        card_layout = QVBoxLayout(frame)
-        title_label = QLabel(title)
-        title_label.setWordWrap(True)
-        title_label.setStyleSheet("font-weight: bold;")
-        card_layout.addWidget(title_label)
-        meta = QLabel(f"{source} · {published_at} · {url}")
-        meta.setWordWrap(True)
-        meta.setStyleSheet("color: #666; font-size: 11px;")
-        card_layout.addWidget(meta)
-        return frame
+        for qs in question_sets[:2]:  # keep the page readable — top 2 pattern sources
+            question = qs.questions[0]
+            header = QLabel(f"Investigation Question: {question}  (로컬 임베딩으로만 판단, 외부 전송 없음)")
+            header.setWordWrap(True)
+            header.setStyleSheet(
+                "font-weight: bold; background-color: #eeeeee; padding: 6px; border-radius: 4px; margin-top: 12px;"
+            )
+            self._real_results_layout.addWidget(header)
+
+            matches = rank_public_evidence(model, question, documents, top_k=3)
+            if not matches:
+                empty = QLabel("관련도 높은 기사를 찾지 못했습니다.")
+                empty.setStyleSheet("color: #777;")
+                self._real_results_layout.addWidget(empty)
+                continue
+
+            for match in matches:
+                card = QFrame()
+                card.setStyleSheet("QFrame { border-left: 4px solid #1565c0; padding: 8px; margin: 4px 0; }")
+                card_layout = QVBoxLayout(card)
+                title = QLabel(f"[{match.classification.value}] {match.title}  (유사도 {match.similarity:.3f})")
+                title.setStyleSheet("font-weight: bold;")
+                title.setWordWrap(True)
+                card_layout.addWidget(title)
+                snippet = QLabel(match.chunk.text)
+                snippet.setWordWrap(True)
+                card_layout.addWidget(snippet)
+                self._real_results_layout.addWidget(card)
