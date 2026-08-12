@@ -1,13 +1,19 @@
 """News Provider (PROJECT_SPEC.md section 25) — Phase 9.
 
-Uses the Naver News Search API. The search query is *only* the company
-name — section 25 explicitly forbids ever appending keywords derived from
-internal patterns ("시설투자", "재고", "차입금" etc.), so there is no
-parameter here that could carry one even if a caller tried; the query is
-hardcoded to `request.public_company_name`.
+Uses the NAVER API HUB news search endpoint (NAVER Cloud Platform). The old
+developers.naver.com Search API stopped accepting new applications on
+2026-07-31 and is being migrated to NAVER API HUB — see
+https://developers.naver.com/notice/article/32530. New/renewed credentials
+come from the NCP console (NAVER API HUB > Application > 인증 정보), not
+the old developer site, and use different header names.
 
-Requires NAVER_CLIENT_ID / NAVER_CLIENT_SECRET (free, from
-https://developers.naver.com/apps/#/register) — raises
+The search query is *only* the company name — section 25 explicitly
+forbids ever appending keywords derived from internal patterns
+("시설투자", "재고", "차입금" etc.), so there is no parameter here that
+could carry one even if a caller tried; the query is hardcoded to
+`request.public_company_name`.
+
+Requires NAVER_CLIENT_ID / NAVER_CLIENT_SECRET — raises
 MissingCredentialError rather than silently returning nothing.
 """
 from __future__ import annotations
@@ -22,7 +28,7 @@ from app.public_data_collector.network_guard import validate_outbound_request
 from app.public_data_collector.schemas import PublicCollectionRequest
 from app.security_logging import log_event
 
-NAVER_NEWS_ENDPOINT = "https://openapi.naver.com/v1/search/news.json"
+NAVER_NEWS_ENDPOINT = "https://naverapihub.apigw.ntruss.com/search/v1/news"
 
 
 class MissingCredentialError(RuntimeError):
@@ -42,18 +48,19 @@ class NaverNewsProvider(PublicDataProvider):
     def fetch(self, request: PublicCollectionRequest) -> list[dict]:
         if not self._client_id or not self._client_secret:
             raise MissingCredentialError(
-                "NAVER_CLIENT_ID / NAVER_CLIENT_SECRET is not set. Get free credentials at "
-                "https://developers.naver.com/apps/#/register and add them to .env."
+                "NAVER_CLIENT_ID / NAVER_CLIENT_SECRET is not set. Get credentials from the NCP "
+                "console (NAVER API HUB > Application > 인증 정보) and add them to .env."
             )
 
         outbound = validate_outbound_request(request.to_outbound_payload())
 
-        headers = {"X-Naver-Client-Id": self._client_id, "X-Naver-Client-Secret": self._client_secret}
+        headers = {"X-NCP-APIGW-API-KEY-ID": self._client_id, "X-NCP-APIGW-API-KEY": self._client_secret}
         params = {
             "query": outbound["public_company_name"],  # company name ONLY — section 25
             "display": min(outbound["page_size"], 100),
             "start": max(1, (outbound["page"] - 1) * outbound["page_size"] + 1),
             "sort": "date",
+            "format": "json",
         }
 
         try:

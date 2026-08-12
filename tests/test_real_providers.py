@@ -14,14 +14,21 @@ from app.public_data_collector.news_provider import NaverNewsProvider
 from app.public_data_collector.schemas import PublicCollectionRequest
 
 
-def test_dart_provider_requires_api_key():
+def test_dart_provider_requires_api_key(monkeypatch):
+    monkeypatch.delenv("DART_API_KEY", raising=False)
     provider = OpenDartProvider(api_key=None)
     request = PublicCollectionRequest(public_company_name="ABC Manufacturing", dart_corp_code="00126380")
     with pytest.raises(DartMissingCredentialError):
         provider.fetch(request)
 
 
-def test_news_provider_requires_credentials():
+def test_news_provider_requires_credentials(monkeypatch):
+    # Explicit None still falls back to the environment inside
+    # NaverNewsProvider.__init__, so a real local .env would otherwise mask
+    # this test — isolate it properly instead of relying on nothing being
+    # configured.
+    monkeypatch.delenv("NAVER_CLIENT_ID", raising=False)
+    monkeypatch.delenv("NAVER_CLIENT_SECRET", raising=False)
     provider = NaverNewsProvider(client_id=None, client_secret=None)
     request = PublicCollectionRequest(public_company_name="ABC Manufacturing")
     with pytest.raises(NewsMissingCredentialError):

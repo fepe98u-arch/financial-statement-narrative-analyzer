@@ -1,16 +1,20 @@
 """Entry point for the Financial Statement Narrative Analyzer desktop app.
 
-Phase 1: local-only shell + synthetic dashboard. No network code exists
-anywhere in this project yet — see PROJECT_SPEC.md section 57 for the phase
-plan and section 59 for why nothing here calls out to the internet.
+The only network code in the project lives in app/public_data_collector/
+(PROJECT_SPEC.md section 23) and only runs when a user explicitly triggers
+a public-data fetch — nothing here auto-connects on startup.
 """
 from __future__ import annotations
 
 import sys
 
-from PySide6.QtWidgets import QApplication
+from app.env_loader import load_env_file
 
-from app.ui.main_window import MainWindow
+load_env_file()
+
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from app.ui.main_window import MainWindow  # noqa: E402
 
 
 def main() -> int:
