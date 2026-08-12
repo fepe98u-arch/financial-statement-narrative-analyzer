@@ -66,6 +66,20 @@ def read_wide_statement(path: Path) -> pl.DataFrame:
     return long_df
 
 
+def rows_to_long_df(rows: list[dict]) -> pl.DataFrame:
+    """Same long format (raw_account_name, year, amount) from a plain list
+    of dicts — the shape app/public_data_collector/dart_financials.py
+    returns, so DART-sourced rows go through the exact same mapping-preview
+    and save path as a file import."""
+    if not rows:
+        raise StatementFormatError("가져올 데이터가 없습니다.")
+    return pl.DataFrame(rows).with_columns(
+        pl.col("year").cast(pl.Int64),
+        pl.col("amount").cast(pl.Float64),
+        pl.col("raw_account_name").cast(pl.Utf8).str.strip_chars(),
+    )
+
+
 @dataclass(frozen=True)
 class AccountGroup:
     raw_account_name: str
@@ -86,12 +100,33 @@ def group_by_account(long_df: pl.DataFrame) -> list[AccountGroup]:
 def save_imported_facts(company: str, long_df: pl.DataFrame, account_code_by_raw_name: dict[str, str]) -> Path:
     """`account_code_by_raw_name` maps raw_account_name -> canonical code for
     every row the caller decided to keep (rows for excluded raw names should
-    simply be absent from this dict, not mapped to a placeholder)."""
+    simply be absent from this dict, not mapped to a placeholder).
+
+    Real filings sometimes report the same concept under two different raw
+    labels (e.g. a subtotal line named identically to a note-level detail
+    line) that both get mapped to the same canonical account — rather than
+    silently keeping one and dropping the other, that's surfaced as an
+    error so the user picks which raw label to keep (section 10's "don't
+    silently resolve ambiguity", applied to this collision too).
+    """
     rows = []
+    claimed_by: dict[tuple[int, str], str] = {}  # (year, account_code) -> raw_account_name
+    conflicts: set[str] = set()
+
     for row in long_df.iter_rows(named=True):
-        code = account_code_by_raw_name.get(row["raw_account_name"])
+        raw_name = row["raw_account_name"]
+        code = account_code_by_raw_name.get(raw_name)
         if code is None:
             continue
+
+        key = (row["year"], code)
+        existing_raw_name = claimed_by.get(key)
+        if existing_raw_name is not None and existing_raw_name != raw_name:
+            account_label = CANONICAL_ACCOUNT_NAMES.get(code, code)
+            conflicts.add(f"{row['year']}년 {account_label}: '{existing_raw_name}' vs '{raw_name}'")
+            continue
+        claimed_by[key] = raw_name
+
         rows.append(
             {
                 "company": company,
@@ -101,6 +136,12 @@ def save_imported_facts(company: str, long_df: pl.DataFrame, account_code_by_raw
                 "amount": row["amount"],
                 "unit": UNIT_LABEL_DEFAULT,
             }
+        )
+
+    if conflicts:
+        raise StatementFormatError(
+            "같은 표준계정으로 매핑된 서로 다른 원본 항목이 있습니다. 매핑 화면에서 하나만 남기고 "
+            "나머지는 '(제외 - 가져오지 않음)'으로 바꿔주세요:\n" + "\n".join(sorted(conflicts))
         )
 
     if not rows:

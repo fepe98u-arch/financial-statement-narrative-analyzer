@@ -100,3 +100,25 @@ def test_cloud_sync_marker_detects_onedrive():
 
 def test_cloud_sync_marker_none_for_normal_path():
     assert detect_cloud_sync_marker(Path("C:/Users/x/Documents/project/data")) is None
+
+
+def test_save_imported_facts_rejects_two_raw_names_mapped_to_same_account_year(tmp_path, monkeypatch):
+    # Real DART filings can report the same concept under two different
+    # labels for the same year (e.g. a subtotal line and a note-level
+    # detail line) — both mapped to the same canonical account must not be
+    # silently merged/overwritten.
+    target_csv = tmp_path / "imported_financials.csv"
+    monkeypatch.setattr(si, "IMPORTED_CSV", target_csv)
+
+    long_df = pl.DataFrame(
+        {
+            "raw_account_name": ["매출채권", "매출채권및기타채권"],
+            "year": [2025, 2025],
+            "amount": [1000.0, 1200.0],
+        }
+    )
+
+    with pytest.raises(si.StatementFormatError):
+        si.save_imported_facts("테스트회사", long_df, {"매출채권": "RECEIVABLE", "매출채권및기타채권": "RECEIVABLE"})
+
+    assert not target_csv.exists()
