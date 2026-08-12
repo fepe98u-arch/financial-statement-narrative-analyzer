@@ -45,6 +45,27 @@ def classify_similarity(similarity: float) -> EvidenceClassification:
     return EvidenceClassification.POSSIBLE if similarity >= POSSIBLE_THRESHOLD else EvidenceClassification.NO_EVIDENCE_FOUND
 
 
+def documents_from_provider_results(results: list[dict]) -> list[PublicDocument]:
+    """Adapts a Public Data Collector provider's plain-dict results (see
+    app/public_data_collector/base.py — same shape for the fake and real
+    providers) into PublicDocument instances so real fetched articles go
+    through the exact same local ranking pipeline as the synthetic fixture.
+    `content` is whatever text the provider actually returned (a snippet,
+    per section 26 — no full-text scraping), never the full article body."""
+    return [
+        PublicDocument(
+            public_document_id=r.get("public_document_id") or r.get("url") or "",
+            source=r.get("source", ""),
+            title=r.get("title", ""),
+            published_at=r.get("published_at", ""),
+            url=r.get("url", ""),
+            public_company=r.get("public_company", ""),
+            content=r.get("snippet") or r.get("content") or "",
+        )
+        for r in results
+    ]
+
+
 def rank_public_evidence(
     model, investigation_question: str, documents: list[PublicDocument], top_k: int = 5
 ) -> list[EvidenceMatch]:
