@@ -80,6 +80,21 @@ def rows_to_long_df(rows: list[dict]) -> pl.DataFrame:
     )
 
 
+def build_raw_preview_table(long_df: pl.DataFrame) -> tuple[pl.DataFrame, list[int]]:
+    """Pivots raw (unmapped) long-format data into one row per raw account
+    name, one column per year — a plain read-only view of exactly what was
+    fetched/loaded, no Account Normalizer involved. Lets a user just look
+    at the statement without needing every line item to map onto this
+    app's ~15-account analysis schema."""
+    years = sorted(int(y) for y in long_df["year"].unique().to_list())
+    order = long_df["raw_account_name"].unique(maintain_order=True).to_list()
+
+    wide = long_df.pivot(values="amount", index="raw_account_name", on="year")
+    order_df = pl.DataFrame({"raw_account_name": order, "_order": list(range(len(order)))})
+    wide = wide.join(order_df, on="raw_account_name", how="inner").sort("_order").drop("_order")
+    return wide, years
+
+
 @dataclass(frozen=True)
 class AccountGroup:
     raw_account_name: str

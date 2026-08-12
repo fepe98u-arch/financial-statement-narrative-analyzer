@@ -102,6 +102,17 @@ def test_cloud_sync_marker_none_for_normal_path():
     assert detect_cloud_sync_marker(Path("C:/Users/x/Documents/project/data")) is None
 
 
+def test_build_raw_preview_table_needs_no_account_mapping(tmp_path):
+    csv_path = tmp_path / "statement.csv"
+    _write_wide_csv(csv_path)
+    long_df = si.read_wide_statement(csv_path)
+
+    wide, years = si.build_raw_preview_table(long_df)
+    assert years == [2024, 2025]
+    assert wide.height == 3  # all 3 raw accounts shown, including the unresolved one
+    assert set(wide["raw_account_name"].to_list()) == {"매출", "매출채권", "완전히 관련없는 임의계정XYZ"}
+
+
 def test_save_imported_facts_rejects_two_raw_names_mapped_to_same_account_year(tmp_path, monkeypatch):
     # Real DART filings can report the same concept under two different
     # labels for the same year (e.g. a subtotal line and a note-level

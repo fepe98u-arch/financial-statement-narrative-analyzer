@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -36,6 +37,7 @@ from app.data.cloud_sync_guard import detect_cloud_sync_marker
 from app.data.loader import IMPORTED_CSV
 from app.data.statement_import import (
     StatementFormatError,
+    build_raw_preview_table,
     group_by_account,
     read_wide_statement,
     rows_to_long_df,
@@ -94,6 +96,19 @@ class StatementImportPage(QWidget):
         tabs.addTab(self._build_file_tab(), "파일에서 가져오기")
         tabs.addTab(self._build_dart_tab(), "DART API에서 가져오기")
         layout.addWidget(tabs)
+
+        raw_note = QLabel(
+            "불러온 재무제표 원본 — 매핑 없이 그대로 표시됩니다 (단위: 파일/DART가 보고한 그대로)."
+        )
+        raw_note.setStyleSheet("color: #555; margin: 8px 0 4px 0; font-weight: bold;")
+        layout.addWidget(raw_note)
+
+        self._raw_table = QTableWidget()
+        self._raw_table.verticalHeader().setVisible(False)
+        self._raw_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._raw_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._raw_table.setMinimumHeight(200)
+        layout.addWidget(self._raw_table)
 
         mapping_note = QLabel(
             "매핑 결과가 낮은 신뢰도이거나 인식되지 않은 계정은 기본값이 '제외'입니다. "
@@ -163,6 +178,7 @@ class StatementImportPage(QWidget):
 
         self._file_label.setText(path.name)
         self._long_df = long_df
+        self._populate_raw_preview()
         self._populate_mapping_table()
         self._import_btn.setEnabled(True)
         self._status_label.setText("")
@@ -286,12 +302,42 @@ class StatementImportPage(QWidget):
             self._dart_fetch_btn.setEnabled(True)
 
         self._long_df = long_df
+        self._populate_raw_preview()
         self._populate_mapping_table()
         self._import_btn.setEnabled(True)
         self._dart_status_label.setText(f"✅ {corp['corp_name']} — {long_df.height}개 데이터 항목을 불러왔습니다.")
         self._status_label.setText("")
 
-    # ---- shared mapping table + confirm ------------------------------
+    # ---- shared raw preview + mapping table + confirm ------------------
+
+    def _populate_raw_preview(self) -> None:
+        """Plain read-only view of exactly what was loaded — no Account
+        Normalizer involved, so nothing needs to map onto this app's
+        ~15-account analysis schema just to be looked at."""
+        wide, years = build_raw_preview_table(self._long_df)
+        columns = ["raw_account_name"] + [str(y) for y in years]
+        headers = ["계정명"] + [str(y) for y in years]
+
+        self._raw_table.setRowCount(wide.height)
+        self._raw_table.setColumnCount(len(columns))
+        self._raw_table.setHorizontalHeaderLabels(headers)
+
+        for row_idx, row in enumerate(wide.iter_rows(named=True)):
+            for col_idx, col in enumerate(columns):
+                value = row[col]
+                if col == "raw_account_name":
+                    text = str(value)
+                elif value is None:
+                    text = "-"
+                else:
+                    text = f"{value:,.0f}"
+                item = QTableWidgetItem(text)
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                    if col == "raw_account_name"
+                    else Qt.AlignmentFlag.AlignCenter
+                )
+                self._raw_table.setItem(row_idx, col_idx, item)
 
     def _populate_mapping_table(self) -> None:
         self._combos.clear()
