@@ -38,6 +38,19 @@ FINANCIAL_STATEMENT_ENDPOINT = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll
 REPORT_CODE_ANNUAL = "11011"
 NO_DATA_STATUS = "013"  # OpenDART's "조회된 데이터가 없습니다" status code
 
+# sj_div -> display label. The same account_nm can legitimately appear in
+# more than one of these (e.g. "매출채권" as a balance-sheet balance AND
+# again as a cash-flow-statement working-capital delta) — every merge/group
+# operation below keys on (account_nm, sj_div) together, never account_nm
+# alone, so those never get conflated.
+STATEMENT_SECTION_LABELS = {
+    "BS": "재무상태표",
+    "IS": "손익계산서",
+    "CIS": "포괄손익계산서",
+    "CF": "현금흐름표",
+    "SCE": "자본변동표",
+}
+
 
 class MissingCredentialError(RuntimeError):
     pass
@@ -127,7 +140,10 @@ def _fetch_with_cfs_ofs_fallback(api_key: str, corp_code: str, bsns_year: str, r
 
 def _transform_to_long_rows(statement_items: list[dict], bsns_year: str) -> list[dict]:
     """One DART call returns 당기/전기/전전기 together — expand that into
-    our long format: raw_account_name, year, amount."""
+    our long format: raw_account_name, year, amount, sj_div, sj_nm, ord.
+    sj_div/ord are kept specifically so a later step can (a) never merge
+    same-named accounts from different statements and (b) can group/sort
+    each statement separately, matching how DART itself presents them."""
     base_year = int(bsns_year)
     period_years = {"thstrm_amount": base_year, "frmtrm_amount": base_year - 1, "bfefrmtrm_amount": base_year - 2}
 
@@ -136,6 +152,13 @@ def _transform_to_long_rows(statement_items: list[dict], bsns_year: str) -> list
         account_name = (item.get("account_nm") or "").strip()
         if not account_name:
             continue
+        sj_div = (item.get("sj_div") or "").strip()
+        sj_nm = (item.get("sj_nm") or "").strip() or STATEMENT_SECTION_LABELS.get(sj_div, sj_div or "기타")
+        try:
+            order = int(item.get("ord") or 0)
+        except ValueError:
+            order = 0
+
         for amount_field, year in period_years.items():
             raw_amount = item.get(amount_field)
             if not raw_amount:
@@ -144,7 +167,16 @@ def _transform_to_long_rows(statement_items: list[dict], bsns_year: str) -> list
                 amount = float(str(raw_amount).replace(",", ""))
             except ValueError:
                 continue
-            rows.append({"raw_account_name": account_name, "year": year, "amount": amount})
+            rows.append(
+                {
+                    "raw_account_name": account_name,
+                    "year": year,
+                    "amount": amount,
+                    "sj_div": sj_div,
+                    "sj_nm": sj_nm,
+                    "account_order": order,
+                }
+            )
     return rows
 
 
@@ -170,25 +202,24 @@ def fetch_financial_statement_rows(
     reprt_code: str = REPORT_CODE_ANNUAL,
     timeout_seconds: float = 15.0,
 ) -> list[dict]:
-    """Returns long-format rows (raw_account_name, year, amount) ready for
-    the same account-mapping preview the Excel import flow uses."""
+    """Returns long-format rows (raw_account_name, year, amount, sj_div,
+    sj_nm, account_order) ready for the same account-mapping preview the
+    Excel import flow uses. Rows are merged by (name, year, sj_div) — never
+    by name alone — so a balance-sheet balance and a cash-flow-statement
+    delta that happen to share a label never overwrite each other."""
     key = _require_api_key(api_key)
     earliest_year = latest_year - num_years + 1
 
-    combined: dict[tuple[str, int], float] = {}
+    combined: dict[tuple[str, int, str], dict] = {}
     try:
         for anchor in sorted(anchors_for_years(latest_year, num_years)):  # oldest first: newest anchor wins on overlap
             items = _fetch_with_cfs_ofs_fallback(key, corp_code, str(anchor), reprt_code, fs_div, timeout_seconds)
             for row in _transform_to_long_rows(items, str(anchor)):
-                combined[(row["raw_account_name"], row["year"])] = row["amount"]
+                combined[(row["raw_account_name"], row["year"], row["sj_div"])] = row
     except (requests.RequestException, RuntimeError) as exc:
         log_event("PUBLIC_DATA_FETCH", success=False, provider="dart-financials", error_code=type(exc).__name__)
         raise
 
-    rows = [
-        {"raw_account_name": name, "year": year, "amount": amount}
-        for (name, year), amount in combined.items()
-        if earliest_year <= year <= latest_year
-    ]
+    rows = [row for row in combined.values() if earliest_year <= row["year"] <= latest_year]
     log_event("PUBLIC_DATA_FETCH", success=True, provider="dart-financials", records_count=len(rows))
     return rows

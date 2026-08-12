@@ -61,3 +61,29 @@ CANONICAL_ACCOUNT_NAMES: dict[str, str] = {
     "ALLOWANCE_DOUBTFUL": "대손충당금",
     "TOTAL_ASSETS": "총자산",
 }
+
+# Which DART sj_div (statement section) each canonical account's value
+# should actually come from. Real filings often report the *same* raw
+# label in more than one statement (e.g. "당기순이익" appears in the income
+# statement, again in the cash-flow reconciliation, and again in the
+# statement of changes in equity) — without this, an exact-name match in
+# the wrong statement would auto-accept just as readily as the right one.
+# Used only to decide what to *pre-select* in the import UI; it never
+# blocks a user from manually choosing something else.
+PREFERRED_STATEMENT_SECTIONS: dict[str, tuple[str, ...]] = {
+    "SALES": ("IS", "CIS"),
+    "COGS": ("IS", "CIS"),
+    "OPERATING_PROFIT": ("IS", "CIS"),
+    "NET_INCOME": ("IS", "CIS"),
+    "DEPRECIATION": ("IS", "CIS"),
+    "INTEREST_EXPENSE": ("IS", "CIS"),
+    "RECEIVABLE": ("BS",),
+    "INVENTORY": ("BS",),
+    "STRUCTURE": ("BS",),
+    "MACHINERY": ("BS",),
+    "CONSTRUCTION_IN_PROGRESS": ("BS",),
+    "LT_BORROWINGS": ("BS",),
+    "TOTAL_ASSETS": ("BS",),
+    "ALLOWANCE_DOUBTFUL": ("BS",),
+    "OPERATING_CF": ("CF",),
+}

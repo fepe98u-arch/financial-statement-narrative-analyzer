@@ -44,6 +44,31 @@ def test_transform_to_long_rows_skips_items_without_account_name():
     assert df._transform_to_long_rows(items, "2025") == []
 
 
+def test_transform_to_long_rows_keeps_sj_div_and_label():
+    items = [{"account_nm": "매출채권", "thstrm_amount": "1000", "sj_div": "BS", "sj_nm": "재무상태표", "ord": "5"}]
+    rows = df._transform_to_long_rows(items, "2025")
+    assert rows[0]["sj_div"] == "BS"
+    assert rows[0]["sj_nm"] == "재무상태표"
+    assert rows[0]["account_order"] == 5
+
+
+def test_fetch_does_not_merge_same_name_across_different_statements(monkeypatch):
+    # The real-world bug: "매출채권" as a balance-sheet balance (BS) and
+    # "매출채권" as a cash-flow working-capital delta (CF) must both survive
+    # — previously the later one silently overwrote the earlier one.
+    def fake_fetch(api_key, corp_code, bsns_year, reprt_code, fs_div, timeout_seconds):
+        return [
+            {"account_nm": "매출채권", "sj_div": "BS", "sj_nm": "재무상태표", "thstrm_amount": "500000"},
+            {"account_nm": "매출채권", "sj_div": "CF", "sj_nm": "현금흐름표", "thstrm_amount": "-12000"},
+        ]
+
+    monkeypatch.setattr(df, "_fetch_with_cfs_ofs_fallback", fake_fetch)
+    rows = df.fetch_financial_statement_rows("00000000", latest_year=2025, num_years=1, api_key="dummy-key")
+
+    by_section = {r["sj_div"]: r["amount"] for r in rows}
+    assert by_section == {"BS": 500000.0, "CF": -12000.0}
+
+
 def test_missing_api_key_raises_clear_error(monkeypatch):
     monkeypatch.delenv("DART_API_KEY", raising=False)
     with pytest.raises(df.MissingCredentialError):

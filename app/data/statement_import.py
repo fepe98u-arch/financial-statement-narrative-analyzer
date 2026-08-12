@@ -12,6 +12,15 @@ every other column is a 4-digit year header:
 Raw account names go through the Account Normalizer (section 10) before
 anything is saved — ambiguous rows are surfaced for the user to resolve or
 skip, never guessed automatically.
+
+Every long-format frame in this module carries `sj_div`/`sj_nm` (which
+financial statement a line item belongs to — BS/IS/CF/etc., empty string
+for file imports that carry no such concept) alongside `account_order`
+(display order within that statement). The same account_nm legitimately
+recurs across statements in real DART filings (e.g. "매출채권" as a
+balance-sheet balance AND again as a cash-flow-statement delta) — every
+grouping/merge operation here keys on (raw_account_name, sj_div) together,
+never on the name alone, so those never get silently conflated.
 """
 from __future__ import annotations
 
@@ -26,13 +35,17 @@ from app.domain.dimensions import CANONICAL_ACCOUNT_NAMES
 
 UNIT_LABEL_DEFAULT = "KRW_MILLION"
 
+STATEMENT_SECTION_ORDER = ["재무상태표", "손익계산서", "포괄손익계산서", "현금흐름표", "자본변동표"]
+
 
 class StatementFormatError(ValueError):
     pass
 
 
 def read_wide_statement(path: Path) -> pl.DataFrame:
-    """Returns long format: raw_account_name, year, amount."""
+    """Returns long format: raw_account_name, year, amount, sj_div, sj_nm,
+    account_order. File imports carry no statement-section concept, so
+    sj_div/sj_nm are always "" here — everything lands in one section."""
     suffix = path.suffix.lower()
     if suffix in (".xlsx", ".xls"):
         df = pl.read_excel(path)
@@ -52,8 +65,9 @@ def read_wide_statement(path: Path) -> pl.DataFrame:
             "첫 번째 열은 계정과목, 나머지 열은 4자리 연도여야 합니다."
         )
 
-    long_df = df.select([account_col] + year_cols).unpivot(
-        index=account_col, on=year_cols, variable_name="year", value_name="amount"
+    df = df.with_row_index("account_order")
+    long_df = df.select(["account_order", account_col] + year_cols).unpivot(
+        index=["account_order", account_col], on=year_cols, variable_name="year", value_name="amount"
     )
     long_df = long_df.rename({account_col: "raw_account_name"})
     long_df = long_df.filter(pl.col("amount").is_not_null())
@@ -61,86 +75,127 @@ def read_wide_statement(path: Path) -> pl.DataFrame:
         pl.col("year").cast(pl.Int64),
         pl.col("amount").cast(pl.Float64),
         pl.col("raw_account_name").cast(pl.Utf8).str.strip_chars(),
+        pl.col("account_order").cast(pl.Int64),
+        pl.lit("").alias("sj_div"),
+        pl.lit("").alias("sj_nm"),
     )
     long_df = long_df.filter(pl.col("raw_account_name") != "")
     return long_df
 
 
 def rows_to_long_df(rows: list[dict]) -> pl.DataFrame:
-    """Same long format (raw_account_name, year, amount) from a plain list
-    of dicts — the shape app/public_data_collector/dart_financials.py
-    returns, so DART-sourced rows go through the exact same mapping-preview
-    and save path as a file import."""
+    """Same long format from a plain list of dicts — the shape
+    app/public_data_collector/dart_financials.py returns, so DART-sourced
+    rows go through the exact same mapping-preview and save path as a file
+    import."""
     if not rows:
         raise StatementFormatError("가져올 데이터가 없습니다.")
-    return pl.DataFrame(rows).with_columns(
+    df = pl.DataFrame(rows)
+    return df.with_columns(
         pl.col("year").cast(pl.Int64),
         pl.col("amount").cast(pl.Float64),
         pl.col("raw_account_name").cast(pl.Utf8).str.strip_chars(),
+        pl.col("sj_div").cast(pl.Utf8),
+        pl.col("sj_nm").cast(pl.Utf8),
+        pl.col("account_order").cast(pl.Int64),
     )
 
 
-def build_raw_preview_table(long_df: pl.DataFrame) -> tuple[pl.DataFrame, list[int]]:
-    """Pivots raw (unmapped) long-format data into one row per raw account
-    name, one column per year — a plain read-only view of exactly what was
-    fetched/loaded, no Account Normalizer involved. Lets a user just look
-    at the statement without needing every line item to map onto this
-    app's ~15-account analysis schema."""
-    years = sorted(int(y) for y in long_df["year"].unique().to_list())
-    order = long_df["raw_account_name"].unique(maintain_order=True).to_list()
+def _section_sort_key(section_label: str) -> int:
+    try:
+        return STATEMENT_SECTION_ORDER.index(section_label)
+    except ValueError:
+        return len(STATEMENT_SECTION_ORDER)
 
-    wide = long_df.pivot(values="amount", index="raw_account_name", on="year")
-    order_df = pl.DataFrame({"raw_account_name": order, "_order": list(range(len(order)))})
-    wide = wide.join(order_df, on="raw_account_name", how="inner").sort("_order").drop("_order")
-    return wide, years
+
+def build_raw_preview_tables(long_df: pl.DataFrame) -> list[tuple[str, pl.DataFrame, list[int]]]:
+    """One (section_label, wide_df, years) per financial-statement section
+    present in the data — 재무상태표/손익계산서/현금흐름표 etc. for DART
+    data, matching how DART itself presents them; a single "전체" section
+    for file imports, which carry no section info. No Account Normalizer
+    involved — this is a plain read-only view of what was fetched/loaded."""
+    years = sorted(int(y) for y in long_df["year"].unique().to_list())
+    sections_present = long_df["sj_nm"].unique(maintain_order=True).to_list()
+    ordered_sections = sorted(sections_present, key=_section_sort_key)
+
+    tables = []
+    for section in ordered_sections:
+        section_df = long_df.filter(pl.col("sj_nm") == section)
+        order = (
+            section_df.sort("account_order")["raw_account_name"].unique(maintain_order=True).to_list()
+        )
+        wide = section_df.pivot(values="amount", index="raw_account_name", on="year")
+        order_df = pl.DataFrame({"raw_account_name": order, "_order": list(range(len(order)))})
+        wide = wide.join(order_df, on="raw_account_name", how="inner").sort("_order").drop("_order")
+        tables.append((section or "전체", wide, years))
+    return tables
 
 
 @dataclass(frozen=True)
 class AccountGroup:
     raw_account_name: str
+    sj_div: str
+    sj_nm: str
     year_count: int
     mapping: AccountMapping
 
 
 def group_by_account(long_df: pl.DataFrame) -> list[AccountGroup]:
-    """One row per distinct raw account name, with its normalizer result —
-    the unit of decision a user reviews before import (not per-year)."""
+    """One row per distinct (raw_account_name, statement section) — grouping
+    by name alone would silently merge a balance-sheet line and a
+    cash-flow-statement line that happen to share a label."""
+    keys = long_df.select(["raw_account_name", "sj_div", "sj_nm"]).unique(maintain_order=True)
     groups = []
-    for raw_name in long_df["raw_account_name"].unique(maintain_order=True).to_list():
-        year_count = long_df.filter(pl.col("raw_account_name") == raw_name).height
-        groups.append(AccountGroup(raw_name, year_count, normalize_account_name(raw_name)))
+    for raw_name, sj_div, sj_nm in keys.iter_rows():
+        subset_height = long_df.filter(
+            (pl.col("raw_account_name") == raw_name) & (pl.col("sj_div") == sj_div)
+        ).height
+        groups.append(AccountGroup(raw_name, sj_div, sj_nm, subset_height, normalize_account_name(raw_name)))
     return groups
 
 
-def save_imported_facts(company: str, long_df: pl.DataFrame, account_code_by_raw_name: dict[str, str]) -> Path:
-    """`account_code_by_raw_name` maps raw_account_name -> canonical code for
-    every row the caller decided to keep (rows for excluded raw names should
-    simply be absent from this dict, not mapped to a placeholder).
+def save_imported_facts(
+    company: str, long_df: pl.DataFrame, account_code_by_key: dict[tuple[str, str], str]
+) -> Path:
+    """`account_code_by_key` maps (raw_account_name, sj_div) -> canonical
+    code for every row the caller decided to keep (rows for excluded raw
+    names should simply be absent from this dict, not mapped to a
+    placeholder).
 
     Real filings sometimes report the same concept under two different raw
     labels (e.g. a subtotal line named identically to a note-level detail
-    line) that both get mapped to the same canonical account — rather than
-    silently keeping one and dropping the other, that's surfaced as an
-    error so the user picks which raw label to keep (section 10's "don't
-    silently resolve ambiguity", applied to this collision too).
+    line, within the *same* statement) that both get mapped to the same
+    canonical account — rather than silently keeping one and dropping the
+    other, that's surfaced as an error so the user picks which raw label to
+    keep (section 10's "don't silently resolve ambiguity", applied to this
+    collision too).
     """
     rows = []
-    claimed_by: dict[tuple[int, str], str] = {}  # (year, account_code) -> raw_account_name
+    claimed_by: dict[tuple[int, str], tuple[str, str]] = {}  # (year, account_code) -> (raw_account_name, sj_div)
     conflicts: set[str] = set()
 
     for row in long_df.iter_rows(named=True):
         raw_name = row["raw_account_name"]
-        code = account_code_by_raw_name.get(raw_name)
+        sj_div = row["sj_div"]
+        code = account_code_by_key.get((raw_name, sj_div))
         if code is None:
             continue
 
         key = (row["year"], code)
-        existing_raw_name = claimed_by.get(key)
-        if existing_raw_name is not None and existing_raw_name != raw_name:
+        # Identity is (raw_name, sj_div), not raw_name alone — the same
+        # label can legitimately appear in two different statements (e.g.
+        # "매출채권" as a balance-sheet balance AND again as a
+        # cash-flow-statement delta), and mapping both to the same
+        # canonical account is exactly the ambiguity that must be surfaced,
+        # not silently collapsed just because the text happens to match.
+        existing = claimed_by.get(key)
+        if existing is not None and existing != (raw_name, sj_div):
             account_label = CANONICAL_ACCOUNT_NAMES.get(code, code)
-            conflicts.add(f"{row['year']}년 {account_label}: '{existing_raw_name}' vs '{raw_name}'")
+            existing_label = f"{existing[0]} [{existing[1] or '-'}]"
+            current_label = f"{raw_name} [{sj_div or '-'}]"
+            conflicts.add(f"{row['year']}년 {account_label}: '{existing_label}' vs '{current_label}'")
             continue
-        claimed_by[key] = raw_name
+        claimed_by[key] = (raw_name, sj_div)
 
         rows.append(
             {

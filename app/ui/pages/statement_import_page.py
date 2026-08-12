@@ -37,13 +37,13 @@ from app.data.cloud_sync_guard import detect_cloud_sync_marker
 from app.data.loader import IMPORTED_CSV
 from app.data.statement_import import (
     StatementFormatError,
-    build_raw_preview_table,
+    build_raw_preview_tables,
     group_by_account,
     read_wide_statement,
     rows_to_long_df,
     save_imported_facts,
 )
-from app.domain.dimensions import CANONICAL_ACCOUNT_NAMES
+from app.domain.dimensions import CANONICAL_ACCOUNT_NAMES, PREFERRED_STATEMENT_SECTIONS
 from app.public_data_collector.dart_financials import (
     MissingCredentialError,
     fetch_financial_statement_rows,
@@ -61,11 +61,27 @@ EXCLUDE_OPTION = "(제외 - 가져오지 않음)"
 AUTO_ACCEPT_METHODS = (MappingMethod.EXACT, MappingMethod.ACCOUNT_DICTIONARY)
 
 
+def _should_auto_accept(group) -> bool:
+    """A confident name match still isn't enough on its own — the same
+    label recurs across statements in real filings (e.g. "당기순이익" in
+    the income statement, the cash-flow reconciliation, AND the statement
+    of changes in equity), so this only pre-selects a match when it's also
+    coming from the statement section that account is expected to live in.
+    File imports carry no section info (sj_div == "") and skip this check
+    entirely, matching their pre-DART behavior."""
+    if group.mapping.mapping_method not in AUTO_ACCEPT_METHODS:
+        return False
+    if not group.sj_div:
+        return True
+    preferred = PREFERRED_STATEMENT_SECTIONS.get(group.mapping.canonical_account_code)
+    return not preferred or group.sj_div in preferred
+
+
 class StatementImportPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._long_df = None
-        self._combos: dict[str, QComboBox] = {}
+        self._combos: dict[tuple[str, str], QComboBox] = {}  # (raw_account_name, sj_div) -> combo
         self._corp_matches: list[dict] = []
 
         layout = QVBoxLayout(self)
@@ -98,29 +114,30 @@ class StatementImportPage(QWidget):
         layout.addWidget(tabs)
 
         raw_note = QLabel(
-            "불러온 재무제표 원본 — 매핑 없이 그대로 표시됩니다 (단위: 파일/DART가 보고한 그대로)."
+            "불러온 재무제표 원본 — 매핑 없이, DART/파일이 보고한 재무상태표·손익계산서·현금흐름표 "
+            "구성 그대로 표시됩니다."
         )
+        raw_note.setWordWrap(True)
         raw_note.setStyleSheet("color: #555; margin: 8px 0 4px 0; font-weight: bold;")
         layout.addWidget(raw_note)
 
-        self._raw_table = QTableWidget()
-        self._raw_table.verticalHeader().setVisible(False)
-        self._raw_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._raw_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self._raw_table.setMinimumHeight(200)
-        layout.addWidget(self._raw_table)
+        self._raw_preview_container = QWidget()
+        self._raw_preview_layout = QVBoxLayout(self._raw_preview_container)
+        self._raw_preview_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._raw_preview_container)
 
         mapping_note = QLabel(
-            "매핑 결과가 낮은 신뢰도이거나 인식되지 않은 계정은 기본값이 '제외'입니다. "
-            "직접 계정을 선택해야 가져와집니다."
+            "아래는 이 프로그램의 분석 기능(Attention Patterns 등)에 쓸 계정만 골라 가져오는 표입니다. "
+            "매핑 결과가 낮은 신뢰도이거나 인식되지 않은 계정은 기본값이 '제외'이며, 직접 계정을 "
+            "선택해야 가져와집니다. 위 원본 표만 보실 거라면 이 아래는 무시하셔도 됩니다."
         )
         mapping_note.setWordWrap(True)
         mapping_note.setStyleSheet("color: #555; margin: 8px 0 4px 0;")
         layout.addWidget(mapping_note)
 
         self._table = QTableWidget()
-        self._table.setColumnCount(5)
-        self._table.setHorizontalHeaderLabels(["원본 계정명", "연도 수", "매핑 방법", "신뢰도", "가져올 계정"])
+        self._table.setColumnCount(6)
+        self._table.setHorizontalHeaderLabels(["원본 계정명", "구분", "연도 수", "매핑 방법", "신뢰도", "가져올 계정"])
         self._table.verticalHeader().setVisible(False)
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self._table)
@@ -313,31 +330,50 @@ class StatementImportPage(QWidget):
     def _populate_raw_preview(self) -> None:
         """Plain read-only view of exactly what was loaded — no Account
         Normalizer involved, so nothing needs to map onto this app's
-        ~15-account analysis schema just to be looked at."""
-        wide, years = build_raw_preview_table(self._long_df)
-        columns = ["raw_account_name"] + [str(y) for y in years]
-        headers = ["계정명"] + [str(y) for y in years]
+        ~15-account analysis schema just to be looked at. One table per
+        financial-statement section (재무상태표/손익계산서/현금흐름표/...),
+        matching how DART itself presents them."""
+        while self._raw_preview_layout.count():
+            item = self._raw_preview_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
 
-        self._raw_table.setRowCount(wide.height)
-        self._raw_table.setColumnCount(len(columns))
-        self._raw_table.setHorizontalHeaderLabels(headers)
+        for section_label, wide, years in build_raw_preview_tables(self._long_df):
+            header = QLabel(section_label)
+            header.setStyleSheet("font-weight: bold; margin-top: 6px;")
+            self._raw_preview_layout.addWidget(header)
 
-        for row_idx, row in enumerate(wide.iter_rows(named=True)):
-            for col_idx, col in enumerate(columns):
-                value = row[col]
-                if col == "raw_account_name":
-                    text = str(value)
-                elif value is None:
-                    text = "-"
-                else:
-                    text = f"{value:,.0f}"
-                item = QTableWidgetItem(text)
-                item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-                    if col == "raw_account_name"
-                    else Qt.AlignmentFlag.AlignCenter
-                )
-                self._raw_table.setItem(row_idx, col_idx, item)
+            table = QTableWidget()
+            table.verticalHeader().setVisible(False)
+            table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            table.setMinimumHeight(min(260, 32 * (wide.height + 1)))
+
+            columns = ["raw_account_name"] + [str(y) for y in years]
+            headers = ["계정명"] + [str(y) for y in years]
+            table.setRowCount(wide.height)
+            table.setColumnCount(len(columns))
+            table.setHorizontalHeaderLabels(headers)
+
+            for row_idx, row in enumerate(wide.iter_rows(named=True)):
+                for col_idx, col in enumerate(columns):
+                    value = row[col]
+                    if col == "raw_account_name":
+                        text = str(value)
+                    elif value is None:
+                        text = "-"
+                    else:
+                        text = f"{value:,.0f}"
+                    item = QTableWidgetItem(text)
+                    item.setTextAlignment(
+                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                        if col == "raw_account_name"
+                        else Qt.AlignmentFlag.AlignCenter
+                    )
+                    table.setItem(row_idx, col_idx, item)
+
+            self._raw_preview_layout.addWidget(table)
 
     def _populate_mapping_table(self) -> None:
         self._combos.clear()
@@ -346,16 +382,17 @@ class StatementImportPage(QWidget):
         self._table.setRowCount(len(groups))
         for row_idx, group in enumerate(groups):
             self._table.setItem(row_idx, 0, QTableWidgetItem(group.raw_account_name))
-            self._table.setItem(row_idx, 1, QTableWidgetItem(str(group.year_count)))
-            self._table.setItem(row_idx, 2, QTableWidgetItem(group.mapping.mapping_method.value))
-            self._table.setItem(row_idx, 3, QTableWidgetItem(f"{group.mapping.mapping_confidence:.1f}"))
+            self._table.setItem(row_idx, 1, QTableWidgetItem(group.sj_nm or "-"))
+            self._table.setItem(row_idx, 2, QTableWidgetItem(str(group.year_count)))
+            self._table.setItem(row_idx, 3, QTableWidgetItem(group.mapping.mapping_method.value))
+            self._table.setItem(row_idx, 4, QTableWidgetItem(f"{group.mapping.mapping_confidence:.1f}"))
 
             combo = QComboBox()
             combo.addItems([EXCLUDE_OPTION] + list(CANONICAL_ACCOUNT_NAMES.values()))
-            if group.mapping.mapping_method in AUTO_ACCEPT_METHODS:
+            if _should_auto_accept(group):
                 combo.setCurrentText(group.mapping.canonical_account_name)
-            self._combos[group.raw_account_name] = combo
-            self._table.setCellWidget(row_idx, 4, combo)
+            self._combos[(group.raw_account_name, group.sj_div)] = combo
+            self._table.setCellWidget(row_idx, 5, combo)
 
     def _confirm_import(self) -> None:
         company = self._company_input.text().strip()
@@ -366,19 +403,19 @@ class StatementImportPage(QWidget):
             return
 
         name_to_code = {name: code for code, name in CANONICAL_ACCOUNT_NAMES.items()}
-        account_code_by_raw_name = {}
-        for raw_name, combo in self._combos.items():
+        account_code_by_key: dict[tuple[str, str], str] = {}
+        for key, combo in self._combos.items():
             selected = combo.currentText()
             if selected != EXCLUDE_OPTION:
-                account_code_by_raw_name[raw_name] = name_to_code[selected]
+                account_code_by_key[key] = name_to_code[selected]
 
         try:
-            save_imported_facts(company, self._long_df, account_code_by_raw_name)
+            save_imported_facts(company, self._long_df, account_code_by_key)
         except StatementFormatError as exc:
             QMessageBox.warning(self, "가져오기 실패", str(exc))
             return
 
-        imported_accounts = len(account_code_by_raw_name)
+        imported_accounts = len(account_code_by_key)
         self._status_label.setText(
             f"✅ '{company}' — 계정 {imported_accounts}개를 가져왔습니다. "
             "다른 화면(Dashboard 등)의 회사 목록에 반영하려면 프로그램을 한 번 재시작해 주세요."
