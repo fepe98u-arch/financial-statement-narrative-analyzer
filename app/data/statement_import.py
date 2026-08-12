@@ -30,12 +30,20 @@ from pathlib import Path
 import polars as pl
 
 from app.analysis.account_normalizer import AccountMapping, normalize_account_name
-from app.data.loader import IMPORTED_CSV
+from app.data.loader import IMPORTED_CSV, IMPORTED_DIR
 from app.domain.dimensions import CANONICAL_ACCOUNT_NAMES
 
 UNIT_LABEL_DEFAULT = "KRW_MILLION"
 
 STATEMENT_SECTION_ORDER = ["재무상태표", "손익계산서", "포괄손익계산서", "현금흐름표", "자본변동표"]
+
+# The full, unmapped statement (every raw line item DART/a file reported) —
+# kept separately from IMPORTED_CSV (which only holds the ~15-account
+# canonical subset the analysis engines use) purely so it can be displayed
+# read-only elsewhere in the app (e.g. the Dashboard) without needing every
+# line item to map onto that narrow schema.
+RAW_STATEMENTS_CSV = IMPORTED_DIR / "raw_statements.csv"
+RAW_STATEMENT_COLUMNS = ["company", "year", "raw_account_name", "amount", "sj_div", "sj_nm", "account_order"]
 
 
 class StatementFormatError(ValueError):
@@ -230,3 +238,34 @@ def save_imported_facts(
 
     combined.write_csv(IMPORTED_CSV)
     return IMPORTED_CSV
+
+
+def save_raw_statement(company: str, long_df: pl.DataFrame) -> Path:
+    """Persists the *full*, unmapped statement for a company so it can be
+    displayed elsewhere (e.g. the Dashboard) without going through the
+    Account Normalizer — a read-only record of what was actually loaded."""
+    new_df = long_df.with_columns(pl.lit(company).alias("company")).select(RAW_STATEMENT_COLUMNS)
+
+    RAW_STATEMENTS_CSV.parent.mkdir(parents=True, exist_ok=True)
+    if RAW_STATEMENTS_CSV.exists():
+        existing = pl.read_csv(RAW_STATEMENTS_CSV)
+        key_cols = ["company", "year", "raw_account_name", "sj_div"]
+        existing = existing.join(new_df.select(key_cols), on=key_cols, how="anti")
+        combined = pl.concat([existing, new_df])
+    else:
+        combined = new_df
+
+    combined.write_csv(RAW_STATEMENTS_CSV)
+    return RAW_STATEMENTS_CSV
+
+
+def load_raw_statement(company: str) -> pl.DataFrame | None:
+    """None if this company has never had a raw statement saved (e.g. the
+    built-in synthetic companies, or one only ever partially mapped and
+    imported some other way)."""
+    if not RAW_STATEMENTS_CSV.exists():
+        return None
+    df = pl.read_csv(RAW_STATEMENTS_CSV).filter(pl.col("company") == company)
+    if df.height == 0:
+        return None
+    return df.with_columns(pl.col("sj_div").fill_null(""), pl.col("sj_nm").fill_null(""))

@@ -13,7 +13,6 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -37,11 +36,11 @@ from app.data.cloud_sync_guard import detect_cloud_sync_marker
 from app.data.loader import IMPORTED_CSV
 from app.data.statement_import import (
     StatementFormatError,
-    build_raw_preview_tables,
     group_by_account,
     read_wide_statement,
     rows_to_long_df,
     save_imported_facts,
+    save_raw_statement,
 )
 from app.domain.dimensions import CANONICAL_ACCOUNT_NAMES, PREFERRED_STATEMENT_SECTIONS
 from app.public_data_collector.dart_financials import (
@@ -49,6 +48,7 @@ from app.public_data_collector.dart_financials import (
     fetch_financial_statement_rows,
     search_corp_codes,
 )
+from app.ui.widgets.statement_sections_view import StatementSectionsView
 
 EXCLUDE_OPTION = "(제외 - 가져오지 않음)"
 
@@ -121,10 +121,8 @@ class StatementImportPage(QWidget):
         raw_note.setStyleSheet("color: #555; margin: 8px 0 4px 0; font-weight: bold;")
         layout.addWidget(raw_note)
 
-        self._raw_preview_container = QWidget()
-        self._raw_preview_layout = QVBoxLayout(self._raw_preview_container)
-        self._raw_preview_layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self._raw_preview_container)
+        self._raw_preview = StatementSectionsView()
+        layout.addWidget(self._raw_preview)
 
         mapping_note = QLabel(
             "아래는 이 프로그램의 분석 기능(Attention Patterns 등)에 쓸 계정만 골라 가져오는 표입니다. "
@@ -333,47 +331,7 @@ class StatementImportPage(QWidget):
         ~15-account analysis schema just to be looked at. One table per
         financial-statement section (재무상태표/손익계산서/현금흐름표/...),
         matching how DART itself presents them."""
-        while self._raw_preview_layout.count():
-            item = self._raw_preview_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-
-        for section_label, wide, years in build_raw_preview_tables(self._long_df):
-            header = QLabel(section_label)
-            header.setStyleSheet("font-weight: bold; margin-top: 6px;")
-            self._raw_preview_layout.addWidget(header)
-
-            table = QTableWidget()
-            table.verticalHeader().setVisible(False)
-            table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-            table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            table.setMinimumHeight(min(260, 32 * (wide.height + 1)))
-
-            columns = ["raw_account_name"] + [str(y) for y in years]
-            headers = ["계정명"] + [str(y) for y in years]
-            table.setRowCount(wide.height)
-            table.setColumnCount(len(columns))
-            table.setHorizontalHeaderLabels(headers)
-
-            for row_idx, row in enumerate(wide.iter_rows(named=True)):
-                for col_idx, col in enumerate(columns):
-                    value = row[col]
-                    if col == "raw_account_name":
-                        text = str(value)
-                    elif value is None:
-                        text = "-"
-                    else:
-                        text = f"{value:,.0f}"
-                    item = QTableWidgetItem(text)
-                    item.setTextAlignment(
-                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-                        if col == "raw_account_name"
-                        else Qt.AlignmentFlag.AlignCenter
-                    )
-                    table.setItem(row_idx, col_idx, item)
-
-            self._raw_preview_layout.addWidget(table)
+        self._raw_preview.set_data(self._long_df)
 
     def _populate_mapping_table(self) -> None:
         self._combos.clear()
@@ -402,6 +360,11 @@ class StatementImportPage(QWidget):
         if self._long_df is None:
             return
 
+        # The full raw statement is saved regardless of which accounts get
+        # mapped below — it's what powers the Dashboard's full-statement
+        # view and doesn't depend on the ~15-account analysis schema.
+        save_raw_statement(company, self._long_df)
+
         name_to_code = {name: code for code, name in CANONICAL_ACCOUNT_NAMES.items()}
         account_code_by_key: dict[tuple[str, str], str] = {}
         for key, combo in self._combos.items():
@@ -413,6 +376,10 @@ class StatementImportPage(QWidget):
             save_imported_facts(company, self._long_df, account_code_by_key)
         except StatementFormatError as exc:
             QMessageBox.warning(self, "가져오기 실패", str(exc))
+            self._status_label.setText(
+                f"⚠ '{company}' 원본 재무제표는 저장됐지만, 분석용 계정 매핑은 실패했습니다 (위 오류 참고)."
+            )
+            self._status_label.setStyleSheet("color: #b71c1c;")
             return
 
         imported_accounts = len(account_code_by_key)

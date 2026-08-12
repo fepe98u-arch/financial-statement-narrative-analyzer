@@ -182,3 +182,41 @@ def test_save_imported_facts_rejects_two_raw_names_mapped_to_same_account_year(t
         )
 
     assert not target_csv.exists()
+
+
+def test_save_and_load_raw_statement_round_trips(tmp_path, monkeypatch):
+    target_csv = tmp_path / "raw_statements.csv"
+    monkeypatch.setattr(si, "RAW_STATEMENTS_CSV", target_csv)
+
+    csv_path = tmp_path / "statement.csv"
+    _write_wide_csv(csv_path)
+    long_df = si.read_wide_statement(csv_path)
+
+    si.save_raw_statement("테스트회사", long_df)
+    loaded = si.load_raw_statement("테스트회사")
+
+    assert loaded is not None
+    assert loaded.height == long_df.height
+    assert set(loaded["raw_account_name"].to_list()) == set(long_df["raw_account_name"].to_list())
+
+
+def test_load_raw_statement_returns_none_for_unknown_company(tmp_path, monkeypatch):
+    target_csv = tmp_path / "raw_statements.csv"
+    monkeypatch.setattr(si, "RAW_STATEMENTS_CSV", target_csv)
+
+    assert si.load_raw_statement("존재하지않는회사") is None
+
+
+def test_save_raw_statement_overwrites_same_company_year_account(tmp_path, monkeypatch):
+    target_csv = tmp_path / "raw_statements.csv"
+    monkeypatch.setattr(si, "RAW_STATEMENTS_CSV", target_csv)
+
+    csv_path = tmp_path / "statement.csv"
+    _write_wide_csv(csv_path)
+    long_df = si.read_wide_statement(csv_path)
+
+    si.save_raw_statement("테스트회사", long_df)
+    si.save_raw_statement("테스트회사", long_df)  # re-save same data
+
+    loaded = si.load_raw_statement("테스트회사")
+    assert loaded.height == long_df.height  # not duplicated

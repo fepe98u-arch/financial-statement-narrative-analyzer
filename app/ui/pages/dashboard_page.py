@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -14,6 +15,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.data.loader import build_dashboard_table, list_companies, load_financial_facts
+from app.data.statement_import import load_raw_statement
+from app.ui.widgets.statement_sections_view import StatementSectionsView
 
 ATTENTION_THRESHOLD_PCT = 30.0
 
@@ -52,6 +55,16 @@ class DashboardPage(QWidget):
         self._note.setStyleSheet("color: #b71c1c; margin-top: 6px;")
         layout.addWidget(self._note)
 
+        self._raw_section_label = QLabel("전체 재무제표 원본")
+        self._raw_section_label.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 16px;")
+        layout.addWidget(self._raw_section_label)
+
+        raw_scroll = QScrollArea()
+        raw_scroll.setWidgetResizable(True)
+        self._raw_statement_view = StatementSectionsView()
+        raw_scroll.setWidget(self._raw_statement_view)
+        layout.addWidget(raw_scroll, stretch=1)
+
         self._render(self._companies[0])
 
     def _render(self, company: str) -> None:
@@ -83,3 +96,12 @@ class DashboardPage(QWidget):
                 if col == "yoy_pct" and value is not None and abs(value) >= ATTENTION_THRESHOLD_PCT:
                     item.setForeground(Qt.GlobalColor.red)
                 self._table.setItem(row_idx, col_idx, item)
+
+        raw_long_df = load_raw_statement(company)
+        if raw_long_df is None:
+            self._raw_statement_view.set_empty_message(
+                "이 회사는 '재무제표 불러오기'로 가져온 원본 데이터가 없습니다 "
+                "(가상 데이터 회사이거나, 요약 계정만 별도로 입력된 회사일 수 있습니다)."
+            )
+        else:
+            self._raw_statement_view.set_data(raw_long_df)
