@@ -98,7 +98,7 @@ class MainWindow(QMainWindow):
             self._sidebar.addItem(QListWidgetItem(label))
             self._stack.addWidget(factory())
 
-        self._sidebar.currentRowChanged.connect(self._stack.setCurrentIndex)
+        self._sidebar.currentRowChanged.connect(self._on_sidebar_row_changed)
         self._sidebar.setCurrentRow(0)
 
         body.addWidget(self._sidebar)
@@ -109,3 +109,9 @@ class MainWindow(QMainWindow):
         outer_layout.addWidget(body_widget, stretch=1)
 
         self.setCentralWidget(central)
+
+    def _on_sidebar_row_changed(self, row: int) -> None:
+        self._stack.setCurrentIndex(row)
+        page = self._stack.currentWidget()
+        if hasattr(page, "refresh"):
+            page.refresh()

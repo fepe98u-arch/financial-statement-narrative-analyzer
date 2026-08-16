@@ -131,6 +131,23 @@ class PublicDataPage(QWidget):
 
         self._render(self._companies[0])
 
+    def refresh(self) -> None:
+        """Called when this page becomes visible again — picks up companies
+        imported since the page was first built, without an app restart."""
+        self._facts = load_financial_facts()
+        new_companies = list_companies(self._facts)
+        if new_companies == self._companies:
+            return
+        current = self._company_combo.currentText()
+        self._companies = new_companies
+        self._company_combo.blockSignals(True)
+        self._company_combo.clear()
+        self._company_combo.addItems(self._companies)
+        target = current if current in self._companies else self._companies[0]
+        self._company_combo.setCurrentText(target)
+        self._company_combo.blockSignals(False)
+        self._render(target)
+
     def _render(self, company: str) -> None:
         docs = documents_for_company(company)
 
