@@ -26,6 +26,27 @@ def test_abc_manufacturing_triggers_capex_up_depreciation_flat_rule():
     assert "BORROWINGS_UP_INTEREST_FLAT" in hits
 
 
+def test_operating_profit_up_net_income_down_rule_fires_on_divergence():
+    # Found via real LG Energy Solution data: 영업이익 +134% while 순이익
+    # -76% in the same year — a real, sizeable divergence no existing rule
+    # caught until this one was added.
+    year_map = {
+        "OPERATING_PROFIT": {2024: 575_387, 2025: 1_346_120},
+        "NET_INCOME": {2024: 338_602, 2025: 80_803},
+    }
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "OPERATING_PROFIT_UP_NET_INCOME_DOWN" in hits
+
+
+def test_operating_profit_up_net_income_down_rule_silent_when_both_rise():
+    year_map = {
+        "OPERATING_PROFIT": {2024: 100, 2025: 110},
+        "NET_INCOME": {2024: 100, 2025: 120},
+    }
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "OPERATING_PROFIT_UP_NET_INCOME_DOWN" not in hits
+
+
 def test_abc_manufacturing_triggers_production_expansion_narrative_pattern():
     facts = load_financial_facts()
     year_map = to_year_map(facts, "ABC Manufacturing")

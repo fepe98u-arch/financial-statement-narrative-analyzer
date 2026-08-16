@@ -81,6 +81,21 @@ def _rule_netincome_up_ocf_down(year_map: YearMap, latest: int, prior: int) -> R
     return None
 
 
+def _rule_operating_profit_up_net_income_down(year_map: YearMap, latest: int, prior: int) -> RelationshipRuleHit | None:
+    op_g, ni_g = _g(year_map, "OPERATING_PROFIT", latest, prior), _g(year_map, "NET_INCOME", latest, prior)
+    if op_g is None or ni_g is None:
+        return None
+    if op_g > NOTABLE_GROWTH_PCT and ni_g < -NOTABLE_GROWTH_PCT:
+        return RelationshipRuleHit(
+            "OPERATING_PROFIT_UP_NET_INCOME_DOWN",
+            "Attention Pattern",
+            "영업이익은 증가했는데 순이익은 감소했습니다. 영업외손익(금융비용, 지분법손익, 일회성 손실 등)에서 "
+            "큰 변화가 있었는지 확인이 필요할 수 있습니다.",
+            {"영업이익증가율": op_g, "순이익증가율": ni_g},
+        )
+    return None
+
+
 def _rule_sales_up_receivable_up_faster(year_map: YearMap, latest: int, prior: int) -> RelationshipRuleHit | None:
     sales_g, recv_g = _g(year_map, "SALES", latest, prior), _g(year_map, "RECEIVABLE", latest, prior)
     if sales_g is None or recv_g is None:
@@ -145,6 +160,7 @@ _ALL_RULES = (
     _rule_sales_down_receivable_up,
     _rule_sales_down_inventory_up,
     _rule_netincome_up_ocf_down,
+    _rule_operating_profit_up_net_income_down,
     _rule_sales_up_receivable_up_faster,
     _rule_sales_up_inventory_up_faster,
     _rule_capex_up_depreciation_flat,

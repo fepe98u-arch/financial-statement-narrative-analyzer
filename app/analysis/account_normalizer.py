@@ -9,12 +9,28 @@ meant to be surfaced for a human to confirm (section 10: "모호한 경우
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 
 from rapidfuzz import fuzz, process
 
 from app.domain.dimensions import CANONICAL_ACCOUNT_NAMES
+
+# DART convention appends one of these to profit/income line items to flag
+# that the figure could be negative (e.g. "당기순이익(손실)",
+# "영업이익(손실)") — real data showed this qualifier alone was pushing
+# otherwise-exact matches down into 90.0-capped FUZZY territory and getting
+# excluded by the import UI's auto-accept policy. Stripped before matching
+# so these resolve as the exact/dictionary hits they actually are; genuinely
+# different concepts that happen to share the suffix (e.g.
+# "법인세비용차감전순이익(손실)", "계속영업이익(손실)") aren't in
+# ACCOUNT_DICTIONARY even once stripped, so they correctly stay unresolved.
+_TRAILING_QUALIFIER_PATTERN = re.compile(r"\s*\((손실|이익|손익)\)\s*$")
+
+
+def _strip_trailing_qualifier(name: str) -> str:
+    return _TRAILING_QUALIFIER_PATTERN.sub("", name).strip()
 
 # Known synonyms seen across different filing years/formats. This is a
 # starting dictionary, not exhaustive — unknown labels fall through to fuzzy
@@ -71,18 +87,29 @@ class AccountMapping:
     mapping_confidence: float  # 0.0-100.0
 
 
+def _match_exact_or_dictionary(name: str) -> tuple[str, MappingMethod] | None:
+    if name in CANONICAL_ACCOUNT_NAMES.values():
+        code = next(c for c, canonical_name in CANONICAL_ACCOUNT_NAMES.items() if canonical_name == name)
+        return code, MappingMethod.EXACT
+    if name in ACCOUNT_DICTIONARY:
+        return ACCOUNT_DICTIONARY[name], MappingMethod.ACCOUNT_DICTIONARY
+    return None
+
+
 def normalize_account_name(raw_account_name: str) -> AccountMapping:
     raw = raw_account_name.strip()
 
-    if raw in CANONICAL_ACCOUNT_NAMES.values():
-        code = next(c for c, name in CANONICAL_ACCOUNT_NAMES.items() if name == raw)
-        return AccountMapping(raw, code, CANONICAL_ACCOUNT_NAMES[code], MappingMethod.EXACT, 100.0)
+    direct = _match_exact_or_dictionary(raw)
+    if direct is not None:
+        code, method = direct
+        return AccountMapping(raw, code, CANONICAL_ACCOUNT_NAMES[code], method, 100.0)
 
-    if raw in ACCOUNT_DICTIONARY:
-        code = ACCOUNT_DICTIONARY[raw]
-        return AccountMapping(
-            raw, code, CANONICAL_ACCOUNT_NAMES[code], MappingMethod.ACCOUNT_DICTIONARY, 100.0
-        )
+    stripped = _strip_trailing_qualifier(raw)
+    if stripped != raw:
+        stripped_match = _match_exact_or_dictionary(stripped)
+        if stripped_match is not None:
+            code, method = stripped_match
+            return AccountMapping(raw, code, CANONICAL_ACCOUNT_NAMES[code], method, 100.0)
 
     match = process.extractOne(raw, ACCOUNT_DICTIONARY.keys(), scorer=fuzz.WRatio)
     if match is not None:

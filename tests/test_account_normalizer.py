@@ -23,3 +23,32 @@ def test_unrecognizable_name_is_unresolved_not_guessed():
     result = normalize_account_name("완전히 알 수 없는 계정명 XYZ")
     assert result.mapping_method == MappingMethod.UNRESOLVED
     assert result.canonical_account_code is None
+
+
+def test_loss_qualifier_suffix_is_stripped_before_exact_match():
+    # DART convention: profit/income lines are labeled "X(손실)" to flag
+    # they could be negative. Found via real LG Energy Solution data where
+    # "당기순이익(손실)"/"영업이익(손실)" were falling through to a
+    # 90.0-capped FUZZY match and getting excluded by the import UI.
+    net_income = normalize_account_name("당기순이익(손실)")
+    assert net_income.canonical_account_code == "NET_INCOME"
+    assert net_income.mapping_method == MappingMethod.ACCOUNT_DICTIONARY
+    assert net_income.mapping_confidence == 100.0
+
+    operating_profit = normalize_account_name("영업이익(손실)")
+    assert operating_profit.canonical_account_code == "OPERATING_PROFIT"
+    assert operating_profit.mapping_method == MappingMethod.EXACT
+    assert operating_profit.mapping_confidence == 100.0
+
+
+def test_loss_qualifier_stripping_does_not_invent_matches_for_distinct_concepts():
+    # "법인세비용차감전순이익" (profit before tax) is genuinely not the
+    # same thing as net income — stripping "(손실)" must not promote it to
+    # a confident ACCOUNT_DICTIONARY/EXACT match the way it correctly does
+    # for "당기순이익(손실)". It can still surface as a low-stakes FUZZY
+    # suggestion (for a human to review in the mapping table) — it just
+    # must stay capped at the same 90.0 ceiling as any other coincidental
+    # substring match, never treated as confirmed.
+    result = normalize_account_name("법인세비용차감전순이익(손실)")
+    assert result.mapping_method == MappingMethod.FUZZY
+    assert result.mapping_confidence == 90.0

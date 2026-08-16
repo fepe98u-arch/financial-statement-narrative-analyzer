@@ -62,33 +62,37 @@ CANONICAL_ACCOUNT_NAMES: dict[str, str] = {
     "TOTAL_ASSETS": "총자산",
 }
 
-# Which DART sj_div (statement section) each canonical account's value
-# should actually come from. Real filings often report the *same* raw
-# label in more than one statement (e.g. "당기순이익" appears in the income
-# statement, again in the cash-flow reconciliation, and again in the
-# statement of changes in equity) — without this, an exact-name match in
-# the wrong statement would auto-accept just as readily as the right one.
-# Used only to decide what to *pre-select* in the import UI; it never
-# blocks a user from manually choosing something else.
-PREFERRED_STATEMENT_SECTIONS: dict[str, tuple[str, ...]] = {
-    "SALES": ("IS", "CIS"),
-    "COGS": ("IS", "CIS"),
-    "OPERATING_PROFIT": ("IS", "CIS"),
-    "NET_INCOME": ("IS", "CIS"),
-    # Both of these routinely show up a second time in the cash-flow
-    # statement (depreciation as a non-cash addback, interest as a
-    # supplemental "이자비용/이자지급액" disclosure) — real filings from
-    # both Samsung and Yuhan reported them there, not just in the income
-    # statement.
-    "DEPRECIATION": ("IS", "CIS", "CF"),
-    "INTEREST_EXPENSE": ("IS", "CIS", "CF"),
-    "RECEIVABLE": ("BS",),
-    "INVENTORY": ("BS",),
-    "STRUCTURE": ("BS",),
-    "MACHINERY": ("BS",),
-    "CONSTRUCTION_IN_PROGRESS": ("BS",),
-    "LT_BORROWINGS": ("BS",),
-    "TOTAL_ASSETS": ("BS",),
-    "ALLOWANCE_DOUBTFUL": ("BS",),
-    "OPERATING_CF": ("CF",),
+# Which single DART sj_div (statement section) each canonical account's
+# value should actually come from. Real filings often report the *same*
+# raw label in more than one statement — not just "당기순이익" in the
+# income statement, the cash-flow reconciliation, and the statement of
+# changes in equity, but also (very commonly) the income statement's own
+# bottom line repeated verbatim as the first line of the comprehensive
+# income statement (IS and CIS reporting the identical 당기순이익 figure
+# is standard practice, not a rare edge case). Allowing *both* as
+# "preferred" meant both auto-accepted and collided on save. Exactly one
+# section is preferred per account — everything else still shows up in the
+# mapping table for a human to pick manually, this only controls what gets
+# pre-selected.
+PREFERRED_STATEMENT_SECTIONS: dict[str, str] = {
+    "SALES": "IS",
+    "COGS": "IS",
+    "OPERATING_PROFIT": "IS",
+    "NET_INCOME": "IS",
+    # Real filings from Samsung and Yuhan both reported these as a separate
+    # exact-match line inside the cash-flow statement (as a non-cash
+    # addback / supplemental disclosure) — the income statement rarely
+    # breaks them out as their own top-level line (they're usually folded
+    # into COGS/SG&A there), so CF is the more reliable single source.
+    "DEPRECIATION": "CF",
+    "INTEREST_EXPENSE": "CF",
+    "RECEIVABLE": "BS",
+    "INVENTORY": "BS",
+    "STRUCTURE": "BS",
+    "MACHINERY": "BS",
+    "CONSTRUCTION_IN_PROGRESS": "BS",
+    "LT_BORROWINGS": "BS",
+    "TOTAL_ASSETS": "BS",
+    "ALLOWANCE_DOUBTFUL": "BS",
+    "OPERATING_CF": "CF",
 }

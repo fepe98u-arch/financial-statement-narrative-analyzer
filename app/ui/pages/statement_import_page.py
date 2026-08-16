@@ -89,7 +89,7 @@ def _should_auto_accept(group) -> bool:
     if not group.sj_div:
         return True
     preferred = PREFERRED_STATEMENT_SECTIONS.get(group.mapping.canonical_account_code)
-    return not preferred or group.sj_div in preferred
+    return not preferred or group.sj_div == preferred
 
 
 class StatementImportPage(QWidget):

@@ -49,6 +49,10 @@ RULE_QUESTION_TEMPLATES: dict[str, list[str]] = {
     "SALES_DOWN_RECEIVABLE_UP": ["매출 감소 중 매출채권이 증가한 원인은 무엇인가?"],
     "SALES_DOWN_INVENTORY_UP": ["수요 둔화 대비 생산/구매 조정이 있었는가?"],
     "NET_INCOME_UP_OCF_DOWN": ["순이익과 영업현금흐름의 괴리 원인은 무엇인가?"],
+    "OPERATING_PROFIT_UP_NET_INCOME_DOWN": [
+        "영업외손익(금융비용, 지분법손익, 외환손익 등)에 일회성 항목이 있었는가?",
+        "이자비용이나 환율 변동이 순이익에 큰 영향을 미쳤는가?",
+    ],
     "SALES_UP_RECEIVABLE_UP_FASTER": ["매출채권이 매출보다 빠르게 증가한 이유는 무엇인가?"],
     "SALES_UP_INVENTORY_UP_FASTER": ["재고가 매출보다 빠르게 증가한 이유는 무엇인가?"],
     "CAPEX_UP_DEPRECIATION_FLAT": ["신규 유형자산의 가동 개시 시점은 언제인가?"],
