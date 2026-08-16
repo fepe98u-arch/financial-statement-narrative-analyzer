@@ -39,6 +39,27 @@ def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text or "")
 
 
+def _normalize_for_dedup(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _deduplicate(results: list[dict]) -> list[dict]:
+    """Portals frequently syndicate the same wire-service article under
+    different sources/titles ('[속보]', outlet name, etc.) but with
+    identical body text — dedupe on the normalized snippet (what the UI
+    actually renders as the article's content) so the same story doesn't
+    show up 5 times just because 5 outlets republished it."""
+    seen: set[str] = set()
+    deduped = []
+    for item in results:
+        key = _normalize_for_dedup(item["snippet"]) or _normalize_for_dedup(item["title"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
 class NaverNewsProvider(PublicDataProvider):
     def __init__(self, client_id: str | None = None, client_secret: str | None = None, timeout_seconds: float = 10.0) -> None:
         self._client_id = client_id or os.environ.get("NAVER_CLIENT_ID")
@@ -83,5 +104,6 @@ class NaverNewsProvider(PublicDataProvider):
             }
             for item in data.get("items", [])
         ]
+        results = _deduplicate(results)
         log_event("PUBLIC_DATA_FETCH", success=True, provider="naver-news", records_count=len(results))
         return results

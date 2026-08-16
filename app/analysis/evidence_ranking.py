@@ -68,10 +68,25 @@ def documents_from_provider_results(results: list[dict]) -> list[PublicDocument]
 
 
 def rank_public_evidence(
-    model, investigation_question: str, documents: list[PublicDocument], top_k: int = 5
+    model,
+    investigation_question: str,
+    documents: list[PublicDocument],
+    top_k: int = 5,
+    topic_keywords: list[str] | None = None,
 ) -> list[EvidenceMatch]:
+    """`topic_keywords`, when given, is a hard pre-filter: only chunks whose
+    document (title or content) contains at least one of these keywords are
+    even considered. The local embedding model alone isn't reliable enough
+    to tell "topically relevant" apart from "generic finance vocabulary
+    overlap with the company name" — see investigation_questions.py's
+    topic_keywords_for() for why this exists. Similarity only ranks within
+    whatever passes the keyword gate."""
     all_chunks: list[tuple[PublicDocument, DocumentChunk]] = []
     for doc in documents:
+        if topic_keywords and not any(
+            kw in doc.title or kw in doc.content for kw in topic_keywords
+        ):
+            continue
         parsed = parse_document(doc)
         for chunk in chunk_document(parsed):
             all_chunks.append((doc, chunk))

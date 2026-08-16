@@ -28,7 +28,7 @@ from app.analysis.evidence_ranking import (
     documents_from_provider_results,
     rank_public_evidence,
 )
-from app.analysis.investigation_questions import generate_investigation_questions
+from app.analysis.investigation_questions import generate_investigation_questions, topic_keywords_for
 from app.analysis.narrative_patterns import detect_narrative_patterns
 from app.analysis.relationship_rules import detect_relationship_rules
 from app.config import get_local_ai_model_path, load_settings, save_settings, set_local_ai_model_path
@@ -218,7 +218,8 @@ class EvidenceAnalysisPage(QWidget):
         for qs in question_sets[:2]:  # keep the page readable — top 2 pattern sources
             for question in qs.questions[:1]:  # one representative question per source
                 self._content_layout.addWidget(self._question_header(question))
-                matches = rank_public_evidence(self._model, question, documents, top_k=3)
+                keywords = topic_keywords_for(qs.source_type, qs.source_id)
+                matches = rank_public_evidence(self._model, question, documents, top_k=3, topic_keywords=keywords)
                 for match in matches:
                     self._content_layout.addWidget(self._evidence_card(match))
 

@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 from app.analysis.document_parsing import chunk_document, parse_document
 from app.analysis.embedding_engine import LocalModelNotInstalledError, load_model
 from app.analysis.evidence_ranking import documents_from_provider_results, rank_public_evidence
-from app.analysis.investigation_questions import generate_investigation_questions
+from app.analysis.investigation_questions import generate_investigation_questions, topic_keywords_for
 from app.analysis.narrative_patterns import detect_narrative_patterns
 from app.analysis.relationship_rules import detect_relationship_rules
 from app.config import get_local_ai_model_path, load_settings, save_settings
@@ -292,7 +292,8 @@ class PublicDataPage(QWidget):
             )
             self._real_results_layout.addWidget(header)
 
-            matches = rank_public_evidence(model, question, documents, top_k=3)
+            keywords = topic_keywords_for(qs.source_type, qs.source_id)
+            matches = rank_public_evidence(model, question, documents, top_k=3, topic_keywords=keywords)
             if not matches:
                 empty = QLabel("관련도 높은 기사를 찾지 못했습니다.")
                 empty.setStyleSheet("color: #777;")

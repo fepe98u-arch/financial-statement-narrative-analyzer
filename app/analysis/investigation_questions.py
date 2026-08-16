@@ -59,6 +59,42 @@ RULE_QUESTION_TEMPLATES: dict[str, list[str]] = {
     "BORROWINGS_UP_INTEREST_FLAT": ["신규 차입 시점과 금리 조건은 어떠한가?"],
 }
 
+# source_id -> keywords that must appear (substring match) somewhere in a
+# candidate article for it to even be considered a semantic-ranking
+# candidate for that question. The local embedding model alone isn't
+# reliable enough to separate topically-relevant articles from articles
+# that just share generic finance/stock-market vocabulary with the company
+# name (e.g. a short-selling-balance article scored HIGHER against the
+# "일회성 영업외손익" question than an article actually about 지분법손실) —
+# this keyword gate is the first filter; embedding similarity only ranks
+# within whatever passes it.
+NARRATIVE_TOPIC_KEYWORDS: dict[str, list[str]] = {
+    "PRODUCTION_EXPANSION": ["증설", "생산라인", "설비투자", "공장 착공", "생산능력", "capex", "CAPEX"],
+    "CAPEX_FINANCING": ["차입", "자금조달", "회사채", "유상증자", "시설자금"],
+    "REVENUE_RECEIVABLE": ["매출채권", "매출 인식", "결제 조건", "외상매출금"],
+    "CREDIT_RISK": ["대손충당금", "신용위험", "채권 회수", "연체", "부실채권"],
+    "PROFIT_CASHFLOW": ["영업현금흐름", "비현금성", "운전자본", "감가상각"],
+}
+
+RULE_TOPIC_KEYWORDS: dict[str, list[str]] = {
+    "SALES_DOWN_RECEIVABLE_UP": ["매출채권", "결제 지연", "외상매출금"],
+    "SALES_DOWN_INVENTORY_UP": ["재고", "재고자산", "수요 둔화", "생산 조정"],
+    "NET_INCOME_UP_OCF_DOWN": ["영업현금흐름", "비현금성", "운전자본"],
+    "OPERATING_PROFIT_UP_NET_INCOME_DOWN": [
+        "영업외손익", "영업외비용", "금융비용", "지분법", "환율", "외화환산", "일회성", "이자비용",
+    ],
+    "SALES_UP_RECEIVABLE_UP_FASTER": ["매출채권", "회수기간", "결제조건"],
+    "SALES_UP_INVENTORY_UP_FASTER": ["재고자산", "재고 증가", "판매 부진"],
+    "CAPEX_UP_DEPRECIATION_FLAT": ["가동", "준공", "시운전", "유형자산 취득"],
+    "BORROWINGS_UP_INTEREST_FLAT": ["차입금", "이자율", "차입 조건", "금리"],
+}
+
+
+def topic_keywords_for(source_type: str, source_id: str) -> list[str]:
+    if source_type == "NARRATIVE_PATTERN":
+        return NARRATIVE_TOPIC_KEYWORDS.get(source_id, [])
+    return RULE_TOPIC_KEYWORDS.get(source_id, [])
+
 
 @dataclass(frozen=True)
 class InvestigationQuestionSet:
