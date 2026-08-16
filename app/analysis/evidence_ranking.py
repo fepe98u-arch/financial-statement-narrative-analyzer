@@ -39,6 +39,7 @@ class EvidenceMatch:
     chunk: DocumentChunk
     similarity: float
     classification: EvidenceClassification
+    url: str = ""
 
 
 def classify_similarity(similarity: float) -> EvidenceClassification:
@@ -95,6 +96,7 @@ def rank_public_evidence(
                 chunk=chunk,
                 similarity=round(float(score), 3),
                 classification=classify_similarity(float(score)),
+                url=doc.url,
             )
         )
     return matches

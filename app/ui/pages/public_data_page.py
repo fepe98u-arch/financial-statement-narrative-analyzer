@@ -11,6 +11,7 @@ Three things live here:
 """
 from __future__ import annotations
 
+import html
 import json
 
 from PySide6.QtCore import Qt
@@ -217,7 +218,7 @@ class PublicDataPage(QWidget):
 
         company = self._company_combo.currentText()
         request = PublicCollectionRequest(
-            public_company_name=company, date_from="2025-01-01", date_to="2026-08-11", page=1, page_size=20
+            public_company_name=company, date_from="2025-01-01", date_to="2026-08-11", page=1, page_size=100
         )
 
         self._real_status_label.setText("🌐 PUBLIC DATA COLLECTION: ACTIVE — 조회 중...")
@@ -302,9 +303,15 @@ class PublicDataPage(QWidget):
                 card = QFrame()
                 card.setStyleSheet("QFrame { border-left: 4px solid #1565c0; padding: 8px; margin: 4px 0; }")
                 card_layout = QVBoxLayout(card)
-                title = QLabel(f"[{match.classification.value}] {match.title}  (유사도 {match.similarity:.3f})")
+                title_text = html.escape(
+                    f"[{match.classification.value}] {match.title}  (유사도 {match.similarity:.3f})"
+                )
+                if match.url:
+                    title_text = f'<a href="{html.escape(match.url)}">{title_text}</a>'
+                title = QLabel(title_text)
                 title.setStyleSheet("font-weight: bold;")
                 title.setWordWrap(True)
+                title.setOpenExternalLinks(True)
                 card_layout.addWidget(title)
                 snippet = QLabel(match.chunk.text)
                 snippet.setWordWrap(True)

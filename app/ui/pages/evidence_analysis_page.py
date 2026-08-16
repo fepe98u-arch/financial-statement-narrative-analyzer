@@ -7,6 +7,8 @@ local model folder — it never tries to download one itself.
 """
 from __future__ import annotations
 
+import html
+
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -238,9 +240,13 @@ class EvidenceAnalysisPage(QWidget):
             f"QFrame {{ border-left: 4px solid {accent}; padding: 8px; margin: 4px 0; }}"
         )
         layout = QVBoxLayout(frame)
-        title = QLabel(f"[{match.classification.value}] {match.title}  (유사도 {match.similarity:.3f})")
+        title_text = html.escape(f"[{match.classification.value}] {match.title}  (유사도 {match.similarity:.3f})")
+        if match.url:
+            title_text = f'<a href="{html.escape(match.url)}">{title_text}</a>'
+        title = QLabel(title_text)
         title.setStyleSheet("font-weight: bold;")
         title.setWordWrap(True)
+        title.setOpenExternalLinks(True)
         layout.addWidget(title)
         meta = QLabel(f"{match.source} · {match.published_at}")
         meta.setStyleSheet("color: #666; font-size: 11px;")
