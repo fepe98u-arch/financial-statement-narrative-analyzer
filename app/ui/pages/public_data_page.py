@@ -80,6 +80,7 @@ class PublicDataPage(QWidget):
         self._table.verticalHeader().setVisible(False)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._table.setMaximumHeight(240)
         layout.addWidget(self._table)
 
         sim_row = QHBoxLayout()
@@ -128,6 +129,7 @@ class PublicDataPage(QWidget):
         self._real_results_layout = QVBoxLayout(self._real_results_container)
         self._real_results_layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._real_results_container)
+        layout.addStretch()
 
         self._render(self._companies[0])
 
