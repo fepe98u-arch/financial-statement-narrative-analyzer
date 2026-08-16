@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -20,18 +21,31 @@ from PySide6.QtWidgets import (
 )
 
 from app.analysis.embedding_engine import LocalModelNotInstalledError, load_model
-from app.analysis.evidence_ranking import EvidenceClassification, rank_public_evidence
+from app.analysis.evidence_ranking import (
+    EvidenceClassification,
+    documents_from_provider_results,
+    rank_public_evidence,
+)
 from app.analysis.investigation_questions import generate_investigation_questions
 from app.analysis.narrative_patterns import detect_narrative_patterns
 from app.analysis.relationship_rules import detect_relationship_rules
-from app.config import get_local_ai_model_path, set_local_ai_model_path
+from app.config import get_local_ai_model_path, load_settings, save_settings, set_local_ai_model_path
 from app.data.loader import list_companies, load_financial_facts, to_year_map, years_for_company
 from app.data.synthetic_public_documents import documents_for_company
+from app.public_data_collector.news_provider import MissingCredentialError, NaverNewsProvider
+from app.public_data_collector.schemas import PublicCollectionRequest
 
 CLASSIFICATION_COLORS = {
     EvidenceClassification.POSSIBLE: "#1565c0",
     EvidenceClassification.NO_EVIDENCE_FOUND: "#757575",
 }
+
+CONSENT_TEXT = (
+    "공개자료 수집 기능은 인터넷을 사용합니다.\n\n"
+    "외부 서비스에는 공개 회사 식별정보와 조회기간 등 최소한의 정보만 전달합니다.\n\n"
+    "미공개 재무제표, 재무수치, 내부 분석결과, Investigation Question은 외부로 전송되지 않습니다.\n\n"
+    "계속하시겠습니까?"
+)
 
 
 class EvidenceAnalysisPage(QWidget):
@@ -40,6 +54,7 @@ class EvidenceAnalysisPage(QWidget):
         self._facts = load_financial_facts()
         self._companies = list_companies(self._facts)
         self._model = None
+        self._real_documents_by_company: dict[str, list] = {}
 
         outer = QVBoxLayout(self)
 
@@ -100,6 +115,39 @@ class EvidenceAnalysisPage(QWidget):
             if widget is not None:
                 widget.deleteLater()
 
+    def _ask_consent(self) -> bool:
+        # Same consent flag as the Public Data page — one confirmation
+        # covers every real network fetch in the app, not per-page.
+        if load_settings().get("public_data_consent_given"):
+            return True
+        reply = QMessageBox.question(
+            self, "공개자료 수집 안내", CONSENT_TEXT, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            settings = load_settings()
+            settings["public_data_consent_given"] = True
+            save_settings(settings)
+            return True
+        return False
+
+    def _fetch_real_documents(self, company: str) -> None:
+        if not self._ask_consent():
+            return
+        request = PublicCollectionRequest(
+            public_company_name=company, date_from="2025-01-01", date_to="2026-08-11", page=1, page_size=20
+        )
+        try:
+            results = NaverNewsProvider().fetch(request)
+        except MissingCredentialError as exc:
+            QMessageBox.warning(self, "네이버 API 키 필요", str(exc))
+            return
+        except Exception as exc:  # network/API errors — surface plainly
+            QMessageBox.warning(self, "조회 실패", str(exc))
+            return
+
+        self._real_documents_by_company[company] = documents_from_provider_results(results)
+        self._render(company)
+
     def _render(self, company: str) -> None:
         self._clear_content()
 
@@ -125,12 +173,28 @@ class EvidenceAnalysisPage(QWidget):
         narrative_hits = detect_narrative_patterns(year_map, latest, prior)
         rule_hits = detect_relationship_rules(year_map, latest, prior)
         question_sets = generate_investigation_questions(narrative_hits, rule_hits)
-        documents = documents_for_company(company)
+
+        # Synthetic companies (ABC Manufacturing, Sample Electronics) get
+        # the local fake-article fixture, no network involved. Anything
+        # else (an imported real company) has no such fixture — offer a
+        # real fetch instead of just reporting nothing's there.
+        documents = documents_for_company(company) or self._real_documents_by_company.get(company, [])
 
         if not question_sets:
             self._content_layout.addWidget(QLabel("현재 조사 질문이 없어 매칭할 대상이 없습니다."))
         if not documents:
-            self._content_layout.addWidget(QLabel("이 회사에 대한 공개자료 예시가 없습니다."))
+            note = QLabel(
+                "이 회사에 대한 가상 공개자료 예시가 없습니다 (합성 회사 전용). "
+                "실제 네이버 뉴스를 가져와서 분석하시겠습니까?"
+            )
+            note.setWordWrap(True)
+            self._content_layout.addWidget(note)
+
+            fetch_btn = QPushButton("🌐 실제 네이버 뉴스 가져오기")
+            fetch_btn.clicked.connect(lambda: self._fetch_real_documents(company))
+            self._content_layout.addWidget(fetch_btn)
+            self._content_layout.addStretch()
+            return
 
         for qs in question_sets[:2]:  # keep the page readable — top 2 pattern sources
             for question in qs.questions[:1]:  # one representative question per source
