@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -60,7 +61,14 @@ class PublicDataPage(QWidget):
         self._companies = list_companies(load_financial_facts())
         self._facts = load_financial_facts()
 
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
 
         note = QLabel(
             "위 표는 로컬 가상(synthetic) 공개자료 예시입니다.\n"
