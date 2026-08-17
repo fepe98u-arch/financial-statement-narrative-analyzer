@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import replace
 
 import requests
 
@@ -29,6 +30,11 @@ from app.public_data_collector.schemas import PublicCollectionRequest
 from app.security_logging import log_event
 
 NAVER_NEWS_ENDPOINT = "https://naverapihub.apigw.ntruss.com/search/v1/news"
+
+# Naver's `start` parameter tops out at 1000, so with display=100 per call,
+# page 10 (start=901) is the last full page reachable — page 11 would ask
+# for start=1001 and the API would reject it.
+NAVER_MAX_PAGES = 10
 
 
 class MissingCredentialError(RuntimeError):
@@ -66,7 +72,9 @@ class NaverNewsProvider(PublicDataProvider):
         self._client_secret = client_secret or os.environ.get("NAVER_CLIENT_SECRET")
         self._timeout_seconds = timeout_seconds
 
-    def fetch(self, request: PublicCollectionRequest) -> list[dict]:
+    def _fetch_page(self, request: PublicCollectionRequest) -> list[dict]:
+        """One raw API call, no dedup — callers dedup once, after
+        aggregating however many pages they fetched."""
         if not self._client_id or not self._client_secret:
             raise MissingCredentialError(
                 "NAVER_CLIENT_ID / NAVER_CLIENT_SECRET is not set. Get credentials from the NCP "
@@ -104,6 +112,28 @@ class NaverNewsProvider(PublicDataProvider):
             }
             for item in data.get("items", [])
         ]
-        results = _deduplicate(results)
         log_event("PUBLIC_DATA_FETCH", success=True, provider="naver-news", records_count=len(results))
         return results
+
+    def fetch(self, request: PublicCollectionRequest) -> list[dict]:
+        return _deduplicate(self._fetch_page(request))
+
+    def fetch_many(self, request: PublicCollectionRequest, max_pages: int = NAVER_MAX_PAGES) -> list[dict]:
+        """Pages through up to `max_pages` calls (capped at Naver's own
+        start<=1000 limit) to pull far more than a single 100-article page,
+        since the search query stays company-name-only either way — see the
+        module docstring. Stops once a page comes back short of a full page
+        (nothing further to fetch); the early-stop check is on the RAW page
+        size, not the post-dedup count, so a page full of duplicates can't
+        be mistaken for the end of results."""
+        max_pages = min(max_pages, NAVER_MAX_PAGES)
+        page_size = min(request.page_size, 100)
+
+        all_results: list[dict] = []
+        for page in range(1, max_pages + 1):
+            batch = self._fetch_page(replace(request, page=page, page_size=page_size))
+            all_results.extend(batch)
+            if len(batch) < page_size:
+                break
+
+        return _deduplicate(all_results)

@@ -16,6 +16,7 @@ import json
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -221,11 +222,14 @@ class PublicDataPage(QWidget):
             public_company_name=company, date_from="2025-01-01", date_to="2026-08-11", page=1, page_size=100
         )
 
-        self._real_status_label.setText("🌐 PUBLIC DATA COLLECTION: ACTIVE — 조회 중...")
+        self._real_status_label.setText(
+            "🌐 PUBLIC DATA COLLECTION: ACTIVE — 최대 10페이지(최대 1,000건)까지 조회 중, 시간이 몇 초 걸릴 수 있습니다..."
+        )
         self._real_fetch_btn.setEnabled(False)
         self._clear_real_results()
+        QApplication.processEvents()  # paint the "조회 중" status before the blocking multi-page fetch
         try:
-            results = NaverNewsProvider().fetch(request)
+            results = NaverNewsProvider().fetch_many(request)
         except MissingCredentialError as exc:
             self._real_status_label.setText(f"🔴 {exc}")
             return
@@ -236,7 +240,7 @@ class PublicDataPage(QWidget):
             self._real_fetch_btn.setEnabled(True)
 
         self._real_status_label.setText(
-            f"🌐 PUBLIC DATA COLLECTION: IDLE — 실제 기사 {len(results)}건 수집 완료 (회사명만 전송됨). "
+            f"🌐 PUBLIC DATA COLLECTION: IDLE — 실제 기사 {len(results)}건 수집 완료(중복 제거 후, 회사명만 전송됨). "
             "아래에는 이 중 조사 질문과 관련도 높은 기사만 표시됩니다."
         )
 
