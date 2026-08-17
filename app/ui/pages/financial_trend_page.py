@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -15,6 +16,8 @@ from PySide6.QtWidgets import (
 
 from app.analysis.metrics_engine import compute_all_metrics
 from app.data.loader import list_companies, load_financial_facts, to_year_map, years_for_company
+from app.data.statement_import import load_raw_statement
+from app.ui.widgets.statement_sections_view import StatementSectionsView
 
 
 class FinancialTrendPage(QWidget):
@@ -42,7 +45,18 @@ class FinancialTrendPage(QWidget):
         self._table.verticalHeader().setVisible(False)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._table.setMaximumHeight(260)
         layout.addWidget(self._table)
+
+        self._raw_growth_label = QLabel("계정별 증감율 (원본 재무제표 전체 계정)")
+        self._raw_growth_label.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 16px;")
+        layout.addWidget(self._raw_growth_label)
+
+        raw_scroll = QScrollArea()
+        raw_scroll.setWidgetResizable(True)
+        self._raw_growth_view = StatementSectionsView()
+        raw_scroll.setWidget(self._raw_growth_view)
+        layout.addWidget(raw_scroll, stretch=1)
 
         self._render(self._companies[0])
 
@@ -69,6 +83,7 @@ class FinancialTrendPage(QWidget):
             self._note.setText("이 회사는 연도가 2개 미만이라 증감률/비율을 계산할 수 없습니다.")
             self._table.setRowCount(0)
             self._table.setColumnCount(0)
+            self._raw_growth_view.set_empty_message("이 회사는 연도가 2개 미만이라 계정별 증감율을 계산할 수 없습니다.")
             return
 
         latest, prior = years[-1], years[-2]
@@ -90,3 +105,12 @@ class FinancialTrendPage(QWidget):
                 item = QTableWidgetItem(text)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._table.setItem(row_idx, col_idx, item)
+
+        raw_long_df = load_raw_statement(company)
+        if raw_long_df is None:
+            self._raw_growth_view.set_empty_message(
+                "이 회사는 '재무제표 불러오기'로 가져온 원본 데이터가 없어 전체 계정별 증감율을 "
+                "계산할 수 없습니다 (가상 데이터 회사이거나, 요약 계정만 별도로 입력된 회사일 수 있습니다)."
+            )
+        else:
+            self._raw_growth_view.set_data(raw_long_df, show_growth=True)
