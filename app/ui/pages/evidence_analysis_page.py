@@ -30,7 +30,11 @@ from app.analysis.evidence_ranking import (
     documents_from_provider_results,
     rank_public_evidence,
 )
-from app.analysis.investigation_questions import generate_investigation_questions, topic_keywords_for
+from app.analysis.investigation_questions import (
+    generate_investigation_questions,
+    search_keyword_for,
+    topic_keywords_for,
+)
 from app.analysis.narrative_patterns import detect_narrative_patterns
 from app.analysis.relationship_rules import detect_relationship_rules
 from app.config import get_local_ai_model_path, load_settings, save_settings, set_local_ai_model_path
@@ -155,26 +159,55 @@ class EvidenceAnalysisPage(QWidget):
     def _fetch_real_documents(self, company: str) -> None:
         if not self._ask_consent():
             return
-        today = date.today()
-        request = PublicCollectionRequest(
-            public_company_name=company,
-            date_from=date(today.year, 1, 1).isoformat(),
-            date_to=today.isoformat(),
-            page=1,
-            page_size=100,
-        )
-        QApplication.processEvents()
-        try:
-            results = NaverNewsProvider().fetch_many(request)
-        except MissingCredentialError as exc:
-            QMessageBox.warning(self, "네이버 API 키 필요", str(exc))
+
+        years = years_for_company(self._facts, company)
+        if len(years) < 2:
+            QMessageBox.warning(self, "조회 불가", "이 회사는 연도가 2개 미만이라 조사 질문을 생성할 수 없습니다.")
             return
-        except Exception as exc:  # network/API errors — surface plainly
-            QMessageBox.warning(self, "조회 실패", str(exc))
+        latest, prior = years[-1], years[-2]
+        year_map = to_year_map(self._facts, company)
+        narrative_hits = detect_narrative_patterns(year_map, latest, prior)
+        rule_hits = detect_relationship_rules(year_map, latest, prior)
+        question_sets = generate_investigation_questions(narrative_hits, rule_hits)
+        if not question_sets:
+            QMessageBox.warning(self, "조회 불가", "현재 탐지된 Attention Pattern이 없어 검색할 대상이 없습니다.")
             return
 
-        self._real_documents_by_company[company] = documents_from_provider_results(results)
-        self._real_fetch_coverage_by_company[company] = coverage_message(results, request.date_from)
+        today = date.today()
+        date_from = date(today.year, 1, 1).isoformat()
+        date_to = today.isoformat()
+
+        # One fetch PER pattern (top 2), each narrowed by that pattern's own
+        # pre-approved keyword — same reasoning as public_data_page.py's
+        # _run_real_fetch. Merged into one document pool afterward so
+        # _render() (a pure re-render, called on every company switch) keeps
+        # working unchanged — it still does its own per-pattern local
+        # keyword-gating and cross-pattern dedup on whatever's here.
+        merged: dict[str, dict] = {}
+        coverage_lines = []
+        for qs in question_sets[:2]:
+            keyword = search_keyword_for(qs.source_type, qs.source_id)
+            request = PublicCollectionRequest(
+                public_company_name=company, date_from=date_from, date_to=date_to, page=1, page_size=100,
+                topic_keyword=keyword,
+            )
+            QApplication.processEvents()
+            try:
+                results = NaverNewsProvider().fetch_many(request)
+            except MissingCredentialError as exc:
+                QMessageBox.warning(self, "네이버 API 키 필요", str(exc))
+                return
+            except Exception as exc:  # network/API errors — surface plainly
+                QMessageBox.warning(self, "조회 실패", str(exc))
+                return
+            for r in results:
+                key = r.get("public_document_id") or r.get("url") or r.get("title")
+                merged.setdefault(key, r)
+            search_desc = f"'{company} {keyword}'" if keyword else f"'{company}'"
+            coverage_lines.append(f"{search_desc}: {coverage_message(results, date_from)}")
+
+        self._real_documents_by_company[company] = documents_from_provider_results(list(merged.values()))
+        self._real_fetch_coverage_by_company[company] = "\n".join(coverage_lines)
         self._render(company)
 
     def _render(self, company: str) -> None:

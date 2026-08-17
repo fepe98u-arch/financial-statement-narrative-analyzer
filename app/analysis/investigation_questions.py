@@ -126,6 +126,58 @@ def topic_keywords_for(source_type: str, source_id: str) -> list[str]:
     return RULE_TOPIC_KEYWORDS.get(source_id, [])
 
 
+# Deliberately a SEPARATE, stricter list from the ones above — those are for
+# LOCAL filtering (never leave the machine) and include direction/judgment
+# phrases ("수요 둔화", "결제 지연", "판매 부진") that would themselves reveal
+# what the pattern engine concluded if sent externally. This one is the
+# single bare account-name-level term (owner-approved exception, CLAUDE.md /
+# PROJECT_SPEC.md section 25, 2026-08-17) allowed into
+# PublicCollectionRequest.topic_keyword — no direction, no qualifier, no
+# number, nothing beyond the plain account name.
+NARRATIVE_SEARCH_KEYWORD: dict[str, str] = {
+    "PRODUCTION_EXPANSION": "설비투자",
+    "CAPEX_FINANCING": "차입금",
+    "REVENUE_RECEIVABLE": "매출채권",
+    "CREDIT_RISK": "대손충당금",
+    "PROFIT_CASHFLOW": "영업현금흐름",
+}
+
+RULE_SEARCH_KEYWORD: dict[str, str] = {
+    "SALES_DOWN_RECEIVABLE_UP": "매출채권",
+    "SALES_DOWN_INVENTORY_UP": "재고자산",
+    "NET_INCOME_UP_OCF_DOWN": "영업현금흐름",
+    "OPERATING_PROFIT_UP_NET_INCOME_DOWN": "영업외손익",
+    "SALES_UP_RECEIVABLE_UP_FASTER": "매출채권",
+    "SALES_UP_INVENTORY_UP_FASTER": "재고자산",
+    "CAPEX_UP_DEPRECIATION_FLAT": "감가상각비",
+    "BORROWINGS_UP_INTEREST_FLAT": "이자비용",
+    "PAYABLES_DOWN_INVENTORY_UP": "매입채무",
+    "CASH_DOWN_BORROWINGS_UP": "차입금",
+    "SALES_UP_MARGIN_DOWN": "매출총이익률",
+    "INTANGIBLE_UP_OCF_FLAT": "무형자산",
+    "RETAINED_EARNINGS_UP_NO_DIVIDEND_SIGNAL": "이익잉여금",
+    "CAPITAL_SURPLUS_UP_BORROWINGS_FLAT": "자본잉여금",
+    "INCOME_TAX_SWING_PRETAX_FLAT": "법인세비용",
+    "RECEIVABLE_UP_ALLOWANCE_LAGGING": "대손충당금",
+    "PAYABLES_UP_COGS_FLAT": "매입채무",
+    "TANGIBLE_ASSETS_UP_DEPRECIATION_FLAT": "유형자산",
+    "OCI_SWING_NET_INCOME_FLAT": "기타포괄손익",
+    "INVENTORY_UP_COGS_FLAT": "재고자산",
+    "ST_BORROWINGS_UP_LT_BORROWINGS_DOWN": "차입금",
+    "TAX_PAYABLE_UP_TAX_EXPENSE_FLAT": "미지급법인세",
+    "EQUITY_METHOD_INVESTMENT_UP_GAIN_LOSS_SWING": "지분법손익",
+}
+
+
+def search_keyword_for(source_type: str, source_id: str) -> str | None:
+    """The single word allowed into PublicCollectionRequest.topic_keyword
+    for this pattern, or None if the pattern predates this exception and
+    has no entry (falls back to a company-name-only search)."""
+    if source_type == "NARRATIVE_PATTERN":
+        return NARRATIVE_SEARCH_KEYWORD.get(source_id)
+    return RULE_SEARCH_KEYWORD.get(source_id)
+
+
 @dataclass(frozen=True)
 class InvestigationQuestionSet:
     source_type: str  # "NARRATIVE_PATTERN" | "RELATIONSHIP_RULE"

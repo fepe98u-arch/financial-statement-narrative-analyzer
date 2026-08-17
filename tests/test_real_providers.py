@@ -4,6 +4,7 @@ the same skip pattern used for PostgreSQL and the local embedding model).
 The credential-missing path is tested unconditionally, since it needs no
 network access at all."""
 import os
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -33,6 +34,31 @@ def test_news_provider_requires_credentials(monkeypatch):
     request = PublicCollectionRequest(public_company_name="ABC Manufacturing")
     with pytest.raises(NewsMissingCredentialError):
         provider.fetch(request)
+
+
+def _fake_response():
+    resp = MagicMock()
+    resp.raise_for_status.return_value = None
+    resp.json.return_value = {"items": []}
+    return resp
+
+
+def test_news_provider_query_includes_topic_keyword_when_given():
+    provider = NaverNewsProvider(client_id="x", client_secret="y")
+    request = PublicCollectionRequest(public_company_name="LG에너지솔루션", topic_keyword="이자비용")
+    with patch("app.public_data_collector.news_provider.requests.get", return_value=_fake_response()) as mock_get:
+        provider.fetch(request)
+    sent_params = mock_get.call_args.kwargs["params"]
+    assert sent_params["query"] == "LG에너지솔루션 이자비용"
+
+
+def test_news_provider_query_is_company_name_only_without_topic_keyword():
+    provider = NaverNewsProvider(client_id="x", client_secret="y")
+    request = PublicCollectionRequest(public_company_name="LG에너지솔루션")
+    with patch("app.public_data_collector.news_provider.requests.get", return_value=_fake_response()) as mock_get:
+        provider.fetch(request)
+    sent_params = mock_get.call_args.kwargs["params"]
+    assert sent_params["query"] == "LG에너지솔루션"
 
 
 def test_dart_provider_live_call_or_skip():

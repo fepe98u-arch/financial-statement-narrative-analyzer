@@ -7,17 +7,21 @@ https://developers.naver.com/notice/article/32530. New/renewed credentials
 come from the NCP console (NAVER API HUB > Application > 인증 정보), not
 the old developer site, and use different header names.
 
-The search query is *only* the company name — section 25 explicitly
-forbids ever appending keywords derived from internal patterns
-("시설투자", "재고", "차입금" etc.), so there is no parameter here that
-could carry one even if a caller tried; the query is hardcoded to
-`request.public_company_name`.
+The search query is the company name, optionally plus ONE topic_keyword —
+see PublicCollectionRequest.topic_keyword's docstring and PROJECT_SPEC.md
+section 25 for the narrow, owner-approved exception this is (2026-08-17):
+exactly one bare account-name-level term from a pre-approved list
+(app/analysis/investigation_questions.py's search_keyword_for()), never a
+direction, amount, full investigation question, or pattern name/score.
+Everything else about section 25 still holds — no free-text keyword, no
+keyword chosen ad hoc by a caller outside that pre-approved list.
 
 Requires NAVER_CLIENT_ID / NAVER_CLIENT_SECRET — raises
 MissingCredentialError rather than silently returning nothing.
 """
 from __future__ import annotations
 
+import html
 import os
 import re
 from dataclasses import replace
@@ -44,7 +48,12 @@ class MissingCredentialError(RuntimeError):
 
 
 def _strip_html(text: str) -> str:
-    return re.sub(r"<[^>]+>", "", text or "")
+    """Strips tags AND decodes entities (Naver's title/description come
+    XML-escaped, e.g. literal "&quot;" for a quote mark) — leaving entities
+    encoded means any caller that re-escapes this text for display (the UI
+    does, for the rich-text article links) double-escapes into garbled
+    "&amp;quot;" instead of a plain quote."""
+    return html.unescape(re.sub(r"<[^>]+>", "", text or ""))
 
 
 def _normalize_for_dedup(text: str) -> str:
@@ -85,9 +94,13 @@ class NaverNewsProvider(PublicDataProvider):
 
         outbound = validate_outbound_request(request.to_outbound_payload())
 
+        query = outbound["public_company_name"]
+        if outbound.get("topic_keyword"):
+            query = f"{query} {outbound['topic_keyword']}"
+
         headers = {"X-NCP-APIGW-API-KEY-ID": self._client_id, "X-NCP-APIGW-API-KEY": self._client_secret}
         params = {
-            "query": outbound["public_company_name"],  # company name ONLY — section 25
+            "query": query,
             "display": min(outbound["page_size"], 100),
             "start": max(1, (outbound["page"] - 1) * outbound["page_size"] + 1),
             "sort": "date",

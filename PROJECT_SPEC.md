@@ -373,7 +373,13 @@ Public Data Collector 함수 또는 Class가 받을 수 있는 Parameter를 명�
 제한한다.
 
 예: PublicCollectionRequest fields: public_company_name,
-public_company_identifier, dart_corp_code, date_from, date_to, page, page_size
+public_company_identifier, dart_corp_code, date_from, date_to, page, page_size,
+topic_keyword
+
+topic_keyword: 2026-08-17 대표 승인으로 추가된 유일한 예외 (섹션 25 참고).
+요청 1건당 정확히 1개, 사전 승인된 계정명 목록
+(app/analysis/investigation_questions.py의 search_keyword_for())에서만 가져온다.
+증감방향, 수치, 조사질문 전체, 패턴명/점수는 절대 포함할 수 없다.
 
 허용하지 않는 fields: financial_data, financial_amount, detected_pattern,
 pattern_score, investigation_question, internal_hypothesis, internal_summary,
@@ -419,13 +425,31 @@ DART_API_KEY는 환경변수로 관리한다.
 
 뉴스 Provider도 동일한 원칙을 적용한다.
 
-가능하면: public_company_name, date range 만으로 회사 관련 기사를 넓게 가져온다.
+기본: public_company_name, date range 만으로 회사 관련 기사를 넓게 가져온다.
 
-외부 뉴스 검색어에: 사업확장, 시설투자, 재고, 차입금, 구축물 등을 자동
-추가하지 않는다.
+**2026-08-17 대표 승인 예외**: 네이버 뉴스 검색 API는 날짜 범위 지정 기능이
+없고 최대 1,000건까지만 조회 가능해서, 뉴스가 많이 나오는 회사는 회사명만으로
+검색하면 최근 며칠치만으로 1,000건이 다 차버려 기말감사 대상 기간(1/1~12/31)
+전체를 커버하지 못하는 문제가 실측으로 확인됐다 (예: LG에너지솔루션 — 회사명만
+검색 시 296건이 전부 최근 3~4일치, 계정명 키워드 1개를 추가하자 같은 검색이
+2026년 1월 이전까지 도달함).
 
-특히 해당 Keyword가 내부 분석 결과에서 나온 경우에는 절대 외부 Query에
-사용하지 않는다.
+이 문제를 해결하기 위해, Attention Pattern별로 미리 정의해 둔 소수의 계정명
+키워드 목록(app/analysis/investigation_questions.py의 *_SEARCH_KEYWORD,
+search_keyword_for()) 중 **정확히 1개**를 public_company_name과 함께 검색어에
+추가할 수 있다. 이 키워드는:
+
+- 반드시 사전에 정의된 목록에서만 골라야 한다 (사람이 즉석에서 입력하거나
+  다른 방식으로 고른 텍스트는 금지).
+- 계정명 수준의 단어만 허용한다 (예: "이자비용", "지분법손익", "매출채권").
+- 증감방향("증가"/"감소"/"급증"/"급감" 등), 수치, 조사질문 전체, 패턴명/점수는
+  절대 포함할 수 없다 — 이 제약은
+  tests/test_investigation_questions.py의
+  test_search_keywords_contain_no_directional_or_judgment_words로
+  자동 검증된다.
+
+그 외의 원칙은 그대로 유지된다: 검색어에 그 이상의 어떤 내부 분석 결과도
+자동 추가하지 않는다.
 
 ---
 

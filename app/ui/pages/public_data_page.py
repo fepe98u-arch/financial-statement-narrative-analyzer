@@ -34,7 +34,11 @@ from PySide6.QtWidgets import (
 from app.analysis.document_parsing import chunk_document, parse_document
 from app.analysis.embedding_engine import LocalModelNotInstalledError, load_model
 from app.analysis.evidence_ranking import documents_from_provider_results, rank_public_evidence
-from app.analysis.investigation_questions import generate_investigation_questions, topic_keywords_for
+from app.analysis.investigation_questions import (
+    generate_investigation_questions,
+    search_keyword_for,
+    topic_keywords_for,
+)
 from app.analysis.narrative_patterns import detect_narrative_patterns
 from app.analysis.relationship_rules import detect_relationship_rules
 from app.config import get_local_ai_model_path, load_settings, save_settings
@@ -46,8 +50,10 @@ from app.public_data_collector.schemas import PublicCollectionRequest
 
 CONSENT_TEXT = (
     "공개자료 수집 기능은 인터넷을 사용합니다.\n\n"
-    "외부 서비스에는 공개 회사 식별정보와 조회기간 등 최소한의 정보만 전달합니다.\n\n"
-    "미공개 재무제표, 재무수치, 내부 분석결과, Investigation Question은 외부로 전송되지 않습니다.\n\n"
+    "외부 서비스에는 공개 회사 식별정보, 조회기간, 그리고 Attention Pattern별로 미리 정해둔 계정명 키워드 "
+    "최대 1개(예: 이자비용)가 전달됩니다.\n\n"
+    "미공개 재무제표, 재무수치, 증감방향, 내부 분석결과, Investigation Question 전체는 외부로 전송되지 "
+    "않습니다.\n\n"
     "계속하시겠습니까?"
 )
 
@@ -107,8 +113,9 @@ class PublicDataPage(QWidget):
         layout.addWidget(divider)
 
         real_note = QLabel(
-            "🌐 아래 버튼은 실제로 네이버 뉴스 API에 연결됩니다. 전송되는 값은 회사명뿐이며, "
-            "내부 분석 결과나 조사 질문은 절대 검색어로 쓰이지 않습니다."
+            "🌐 아래 버튼은 실제로 네이버 뉴스 API에 연결됩니다. 검색어로 전송되는 값은 회사명과, Attention "
+            "Pattern별로 미리 정해둔 계정명 키워드 최대 1개뿐입니다(예: 이자비용, 지분법손익). 증감방향·수치· "
+            "조사질문 전체·패턴명은 절대 검색어로 쓰이지 않습니다."
         )
         real_note.setWordWrap(True)
         real_note.setStyleSheet(
@@ -219,41 +226,7 @@ class PublicDataPage(QWidget):
             return
 
         company = self._company_combo.currentText()
-        today = date.today()
-        request = PublicCollectionRequest(
-            public_company_name=company,
-            date_from=date(today.year, 1, 1).isoformat(),
-            date_to=today.isoformat(),
-            page=1,
-            page_size=100,
-        )
 
-        self._real_status_label.setText(
-            "🌐 PUBLIC DATA COLLECTION: ACTIVE — 최대 10페이지(최대 1,000건)까지 조회 중, 시간이 몇 초 걸릴 수 있습니다..."
-        )
-        self._real_fetch_btn.setEnabled(False)
-        self._clear_real_results()
-        QApplication.processEvents()  # paint the "조회 중" status before the blocking multi-page fetch
-        try:
-            results = NaverNewsProvider().fetch_many(request)
-        except MissingCredentialError as exc:
-            self._real_status_label.setText(f"🔴 {exc}")
-            return
-        except Exception as exc:  # network/API errors — surface plainly
-            self._real_status_label.setText(f"🔴 조회 실패: {exc}")
-            return
-        finally:
-            self._real_fetch_btn.setEnabled(True)
-
-        coverage = coverage_message(results, request.date_from)
-        self._real_status_label.setText(
-            f"🌐 PUBLIC DATA COLLECTION: IDLE — 실제 기사 {len(results)}건 수집 완료(중복 제거 후, 회사명만 전송됨). "
-            "아래에는 이 중 조사 질문과 관련도 높은 기사만 표시됩니다.\n" + coverage
-        )
-
-        self._render_relevance_ranking(company, results)
-
-    def _render_relevance_ranking(self, company: str, results: list[dict]) -> None:
         model_path = get_local_ai_model_path()
         try:
             model = load_model(model_path) if model_path else None
@@ -261,19 +234,17 @@ class PublicDataPage(QWidget):
             model = None
 
         if model is None:
-            note = QLabel(
+            self._real_status_label.setText(
                 "Local AI 모델이 없어 조사 질문과의 관련도 분석은 생략합니다. "
                 "(Evidence Analysis 화면에서 모델 폴더를 지정하면 여기서도 사용됩니다.)"
             )
-            note.setStyleSheet("color: #777; margin-top: 8px;")
-            self._real_results_layout.addWidget(note)
+            self._clear_real_results()
             return
 
         years = years_for_company(self._facts, company)
         if len(years) < 2:
-            note = QLabel("이 회사는 연도가 2개 미만이라 조사 질문을 생성할 수 없습니다.")
-            note.setStyleSheet("color: #777; margin-top: 8px;")
-            self._real_results_layout.addWidget(note)
+            self._real_status_label.setText("이 회사는 연도가 2개 미만이라 조사 질문을 생성할 수 없습니다.")
+            self._clear_real_results()
             return
 
         latest, prior = years[-1], years[-2]
@@ -282,58 +253,92 @@ class PublicDataPage(QWidget):
         rule_hits = detect_relationship_rules(year_map, latest, prior)
         question_sets = generate_investigation_questions(narrative_hits, rule_hits)
         if not question_sets:
-            note = QLabel(
+            self._real_status_label.setText(
                 "이 회사에서 현재 탐지된 Attention Pattern이 없어 조사 질문이 생성되지 않았습니다 "
-                "(Attention Patterns 화면에서 직접 확인해 보세요 — 가져온 계정 수가 적으면 "
-                "패턴이 안 잡힐 수 있습니다)."
+                "(Attention Patterns 화면에서 직접 확인해 보세요 — 가져온 계정 수가 적으면 패턴이 안 잡힐 수 있습니다)."
             )
-            note.setWordWrap(True)
-            note.setStyleSheet("color: #777; margin-top: 8px;")
-            self._real_results_layout.addWidget(note)
+            self._clear_real_results()
             return
 
-        documents = documents_from_provider_results(results)
+        self._real_fetch_btn.setEnabled(False)
+        self._clear_real_results()
 
-        # Each article is shown under only the first pattern it matches —
-        # without this, the same article (especially one whose topic
-        # keywords overlap across two patterns, e.g. "지분법") could appear
-        # under every pattern it happens to pass the keyword gate for,
-        # which defeats the point of separating them by pattern at all.
+        today = date.today()
+        date_from = date(today.year, 1, 1).isoformat()
+        date_to = today.isoformat()
+
+        # One fetch PER pattern (top 2), each narrowed by that pattern's own
+        # pre-approved keyword — not one shared company-only fetch, both
+        # because that's a much narrower/more relevant search and because it
+        # naturally keeps articles separated by the pattern they were
+        # fetched for. See search_keyword_for()'s docstring.
         claimed_document_ids: set[str] = set()
-        for qs in question_sets[:2]:  # keep the page readable — top 2 pattern sources
-            question = qs.questions[0]
-            header = QLabel(f"Investigation Question: {question}  (로컬 임베딩으로만 판단, 외부 전송 없음)")
-            header.setWordWrap(True)
-            header.setStyleSheet(
-                "font-weight: bold; background-color: #eeeeee; padding: 6px; border-radius: 4px; margin-top: 12px;"
-            )
-            self._real_results_layout.addWidget(header)
-
-            keywords = topic_keywords_for(qs.source_type, qs.source_id)
-            unclaimed_documents = [d for d in documents if d.public_document_id not in claimed_document_ids]
-            matches = rank_public_evidence(model, question, unclaimed_documents, top_k=3, topic_keywords=keywords)
-            if not matches:
-                empty = QLabel("관련도 높은 기사를 찾지 못했습니다.")
-                empty.setStyleSheet("color: #777;")
-                self._real_results_layout.addWidget(empty)
-                continue
-
-            for match in matches:
-                claimed_document_ids.add(match.document_id)
-                card = QFrame()
-                card.setStyleSheet("QFrame { border-left: 4px solid #1565c0; padding: 8px; margin: 4px 0; }")
-                card_layout = QVBoxLayout(card)
-                title_text = html.escape(
-                    f"[{match.classification.value}] {match.title}  (유사도 {match.similarity:.3f})"
+        status_lines: list[str] = []
+        try:
+            for qs in question_sets[:2]:  # keep the page readable — top 2 pattern sources
+                question = qs.questions[0]
+                header = QLabel(f"Investigation Question: {question}  (로컬 임베딩으로만 판단)")
+                header.setWordWrap(True)
+                header.setStyleSheet(
+                    "font-weight: bold; background-color: #eeeeee; padding: 6px; border-radius: 4px; margin-top: 12px;"
                 )
-                if match.url:
-                    title_text = f'<a href="{html.escape(match.url)}">{title_text}</a>'
-                title = QLabel(title_text)
-                title.setStyleSheet("font-weight: bold;")
-                title.setWordWrap(True)
-                title.setOpenExternalLinks(True)
-                card_layout.addWidget(title)
-                snippet = QLabel(match.chunk.text)
-                snippet.setWordWrap(True)
-                card_layout.addWidget(snippet)
-                self._real_results_layout.addWidget(card)
+                self._real_results_layout.addWidget(header)
+
+                keyword = search_keyword_for(qs.source_type, qs.source_id)
+                request = PublicCollectionRequest(
+                    public_company_name=company,
+                    date_from=date_from,
+                    date_to=date_to,
+                    page=1,
+                    page_size=100,
+                    topic_keyword=keyword,
+                )
+                self._real_status_label.setText(
+                    "\n".join(status_lines + [f"🌐 ACTIVE — '{company} {keyword or ''}' 조회 중..."])
+                )
+                QApplication.processEvents()
+                try:
+                    results = NaverNewsProvider().fetch_many(request)
+                except MissingCredentialError as exc:
+                    self._real_status_label.setText(f"🔴 {exc}")
+                    return
+                except Exception as exc:  # network/API errors — surface plainly
+                    self._real_status_label.setText(f"🔴 조회 실패: {exc}")
+                    return
+
+                coverage = coverage_message(results, request.date_from)
+                search_desc = f"'{company} {keyword}'" if keyword else f"'{company}'"
+                status_lines.append(f"🌐 {search_desc} 검색으로 기사 {len(results)}건 수집(중복 제거 후). {coverage}")
+                self._real_status_label.setText("\n".join(status_lines))
+
+                documents = documents_from_provider_results(results)
+                keywords = topic_keywords_for(qs.source_type, qs.source_id)
+                unclaimed_documents = [d for d in documents if d.public_document_id not in claimed_document_ids]
+                matches = rank_public_evidence(model, question, unclaimed_documents, top_k=3, topic_keywords=keywords)
+                if not matches:
+                    empty = QLabel("관련도 높은 기사를 찾지 못했습니다.")
+                    empty.setStyleSheet("color: #777;")
+                    self._real_results_layout.addWidget(empty)
+                    continue
+
+                for match in matches:
+                    claimed_document_ids.add(match.document_id)
+                    card = QFrame()
+                    card.setStyleSheet("QFrame { border-left: 4px solid #1565c0; padding: 8px; margin: 4px 0; }")
+                    card_layout = QVBoxLayout(card)
+                    title_text = html.escape(
+                        f"[{match.classification.value}] {match.title}  (유사도 {match.similarity:.3f})"
+                    )
+                    if match.url:
+                        title_text = f'<a href="{html.escape(match.url)}">{title_text}</a>'
+                    title = QLabel(title_text)
+                    title.setStyleSheet("font-weight: bold;")
+                    title.setWordWrap(True)
+                    title.setOpenExternalLinks(True)
+                    card_layout.addWidget(title)
+                    snippet = QLabel(match.chunk.text)
+                    snippet.setWordWrap(True)
+                    card_layout.addWidget(snippet)
+                    self._real_results_layout.addWidget(card)
+        finally:
+            self._real_fetch_btn.setEnabled(True)

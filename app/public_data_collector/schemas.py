@@ -9,7 +9,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 ALLOWED_OUTBOUND_FIELDS = frozenset(
-    {"public_company_name", "public_company_identifier", "dart_corp_code", "date_from", "date_to", "page", "page_size"}
+    {
+        "public_company_name",
+        "public_company_identifier",
+        "dart_corp_code",
+        "date_from",
+        "date_to",
+        "page",
+        "page_size",
+        "topic_keyword",
+    }
 )
 
 
@@ -22,6 +31,14 @@ class PublicCollectionRequest:
     date_to: str | None = None
     page: int = 1
     page_size: int = 20
+    # The one narrow, explicit exception to "no exceptions" — owner-approved
+    # 2026-08-17 (CLAUDE.md, PROJECT_SPEC.md section 25). Must be exactly one
+    # bare account-name-level term from a pre-approved list
+    # (app/analysis/investigation_questions.py's *_TOPIC_KEYWORDS), never a
+    # direction, amount, full investigation question, or pattern name/score.
+    # Callers building this by hand instead of via topic_keyword_for_search()
+    # are responsible for that constraint themselves.
+    topic_keyword: str | None = None
 
     def to_outbound_payload(self) -> dict:
         """What would actually go out over the wire — never the request
@@ -35,4 +52,5 @@ class PublicCollectionRequest:
             "date_to": self.date_to,
             "page": self.page,
             "page_size": self.page_size,
+            "topic_keyword": self.topic_keyword,
         }

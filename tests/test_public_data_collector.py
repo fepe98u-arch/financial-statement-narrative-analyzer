@@ -42,6 +42,23 @@ def test_network_guard_allows_only_allowlisted_fields():
     assert payload["public_company_name"] == "ABC Manufacturing"
 
 
+def test_network_guard_allows_the_single_topic_keyword_exception():
+    # CLAUDE.md / PROJECT_SPEC.md section 25, owner-approved 2026-08-17: the
+    # one narrow exception to "no exceptions" — exactly one bare
+    # account-name-level term, never a direction/amount/full question.
+    payload = validate_outbound_request(
+        {"public_company_name": "LG에너지솔루션", "topic_keyword": "이자비용"}
+    )
+    assert payload["topic_keyword"] == "이자비용"
+
+
+def test_network_guard_still_rejects_a_free_text_keyword_field():
+    # topic_keyword being allowed doesn't loosen anything else — a
+    # differently-named or free-form keyword field is still rejected.
+    with pytest.raises(SecurityException):
+        validate_outbound_request({"public_company_name": "ABC", "search_keyword": "이자비용이 늘었다"})
+
+
 def test_network_guard_blocks_secret_leakage(monkeypatch):
     monkeypatch.setenv("DART_API_KEY", "super-secret-value-123")
     with pytest.raises(SecurityException):

@@ -32,13 +32,32 @@ directly:
   name, DART corp_code, date range) from the internet. Nothing else goes out.
 
 Outbound-allowed fields: `public_company_name`, `public_company_identifier`,
-`dart_corp_code`, `date_from`, `date_to`, `page`, `page_size`, and the
-minimum technical parameters a public API needs.
+`dart_corp_code`, `date_from`, `date_to`, `page`, `page_size`, `topic_keyword`,
+and the minimum technical parameters a public API needs.
 
-Outbound-forbidden, no exceptions: any financial amount, account name/change
-rate derived from private analysis, detected pattern, pattern score,
-investigation question, internal hypothesis/summary, human review/audit
-comment, or any private document content or filename.
+`topic_keyword` (added 2026-08-17, explicit owner decision — the one narrow,
+deliberate exception to "no exceptions" below) is exactly ONE bare
+account-name-level term per request (e.g. "이자비용", "지분법손익"), drawn
+only from the pre-approved list in
+`app/analysis/investigation_questions.py`'s `search_keyword_for()` — never
+free text, never picked ad hoc by a caller. It must never carry a direction
+("증가"/"감소"), a number, a full investigation question, or a pattern
+name/score — see PROJECT_SPEC.md section 25 for the full rationale and the
+`test_search_keywords_contain_no_directional_or_judgment_words` test that
+guards the vocabulary. The owner explicitly accepted the residual risk that
+"[company] + [account name]" as a search reveals which account is under
+scrutiny (even without revealing what was found), in exchange for a much
+narrower/more relevant search — Naver's News Search API has no date-range
+filter and caps at 1,000 results, so a bare company-name search for a
+heavily-covered company can exhaust that budget in a few days; adding one
+account-name keyword cuts daily volume enough to reach a full audit year.
+
+Outbound-forbidden, no exceptions: any financial amount, account
+change-rate/direction, detected pattern, pattern score, investigation
+question, internal hypothesis/summary, human review/audit comment, or any
+private document content or filename. (Bare account *name* is conditionally
+allowed only via `topic_keyword` above — nothing else about this list is
+loosened.)
 
 Only one module may ever perform network I/O: `public_data_collector/`
 (built starting Phase 7). No other file imports `requests`, `httpx`,
