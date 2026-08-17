@@ -140,6 +140,44 @@ def build_raw_preview_tables(long_df: pl.DataFrame) -> list[tuple[str, pl.DataFr
 
 
 @dataclass(frozen=True)
+class AccountGrowth:
+    section: str
+    raw_account_name: str
+    prior_year: int
+    latest_year: int
+    prior_amount: float
+    latest_amount: float
+    growth_pct: float
+
+
+def compute_account_growth(long_df: pl.DataFrame) -> list[AccountGrowth]:
+    """YoY growth (latest two years present) for every raw account line,
+    section by section — same source/granularity as build_raw_preview_tables,
+    just reshaped for "which accounts moved the most" scanning instead of a
+    side-by-side value table. Skips accounts missing either year or with a
+    zero prior-year base (growth is undefined, not silently shown as 0%)."""
+    years = sorted(int(y) for y in long_df["year"].unique().to_list())
+    if len(years) < 2:
+        return []
+    latest, prior = years[-1], years[-2]
+    latest_col, prior_col = str(latest), str(prior)
+
+    results: list[AccountGrowth] = []
+    for section_label, wide, _years in build_raw_preview_tables(long_df):
+        if latest_col not in wide.columns or prior_col not in wide.columns:
+            continue
+        for row in wide.iter_rows(named=True):
+            prior_v, latest_v = row.get(prior_col), row.get(latest_col)
+            if prior_v is None or latest_v is None or prior_v == 0:
+                continue
+            growth_pct = round((latest_v - prior_v) / prior_v * 100, 1)
+            results.append(
+                AccountGrowth(section_label, row["raw_account_name"], prior, latest, prior_v, latest_v, growth_pct)
+            )
+    return results
+
+
+@dataclass(frozen=True)
 class AccountGroup:
     raw_account_name: str
     sj_div: str
