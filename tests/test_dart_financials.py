@@ -69,6 +69,19 @@ def test_fetch_does_not_merge_same_name_across_different_statements(monkeypatch)
     assert by_section == {"BS": 500000.0, "CF": -12000.0}
 
 
+def test_search_corp_codes_is_case_insensitive(monkeypatch):
+    monkeypatch.setattr(
+        df,
+        "get_corp_codes",
+        lambda api_key=None: [
+            {"corp_code": "00126380", "corp_name": "LG에너지솔루션", "stock_code": "373220"},
+            {"corp_code": "00164779", "corp_name": "삼성전자", "stock_code": "005930"},
+        ],
+    )
+    matches = df.search_corp_codes("lg")
+    assert any(m["corp_name"] == "LG에너지솔루션" for m in matches)
+
+
 def test_missing_api_key_raises_clear_error(monkeypatch):
     monkeypatch.delenv("DART_API_KEY", raising=False)
     with pytest.raises(df.MissingCredentialError):

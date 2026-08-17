@@ -99,11 +99,11 @@ def get_corp_codes(api_key: str | None = None, force_refresh: bool = False) -> l
 
 
 def search_corp_codes(query: str, api_key: str | None = None, listed_only: bool = True, limit: int = 20) -> list[dict]:
-    query = query.strip()
+    query = query.strip().lower()
     if not query:
         return []
     corps = get_corp_codes(api_key)
-    matches = [c for c in corps if query in c["corp_name"]]
+    matches = [c for c in corps if query in c["corp_name"].lower()]
     if listed_only:
         matches = [c for c in matches if c["stock_code"]]
     return matches[:limit]
