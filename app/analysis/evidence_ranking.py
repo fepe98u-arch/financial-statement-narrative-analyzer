@@ -22,16 +22,6 @@ from app.data.synthetic_public_documents import PublicDocument
 
 POSSIBLE_THRESHOLD = 0.35  # cosine similarity; tune once a real model is in use
 
-# Naver's News Search API does loose, group-wide relevance matching rather
-# than exact-phrase matching (confirmed empirically — quoting the company
-# name in the query made no difference), so most fetched articles for e.g.
-# "LG에너지솔루션" only mention it in passing within a broader LG-conglomerate
-# story. An article whose TITLE names the company is a much stronger signal
-# it's actually about that company (only ~1% of fetched articles clear this
-# bar in practice) — nudges those to the top of the limited top_k shown
-# without hard-excluding everything else, which would gut recall entirely.
-TITLE_COMPANY_MATCH_BONUS = 0.05
-
 
 class EvidenceClassification(str, Enum):
     SUPPORTED = "SUPPORTED"  # human-assigned only, see module docstring
@@ -107,12 +97,8 @@ def rank_public_evidence(
     query_vec = embed_texts(model, [investigation_question])[0]
     chunk_vecs = embed_texts(model, [chunk.text for _, chunk in all_chunks])
     similarities = cosine_similarities(query_vec, chunk_vecs)
-    scores = [
-        min(1.0, float(sim) + TITLE_COMPANY_MATCH_BONUS) if doc.public_company and doc.public_company in doc.title else float(sim)
-        for (doc, _chunk), sim in zip(all_chunks, similarities)
-    ]
 
-    ranked = sorted(zip(all_chunks, scores), key=lambda pair: pair[1], reverse=True)
+    ranked = sorted(zip(all_chunks, similarities), key=lambda pair: pair[1], reverse=True)
 
     matches = []
     for (doc, chunk), score in ranked[:top_k]:

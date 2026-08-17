@@ -57,7 +57,20 @@ def fetch_articles_for_pattern(
     """Fetches real articles for ONE pattern: one query per keyword variant
     (search_keywords_for), merged and deduped, then filtered to only what's
     actually published within [date_from, date_to] (Naver's own date_from/
-    date_to aren't a real filter — see filter_by_date_range). Returns the
+    date_to aren't a real filter — see filter_by_date_range) AND whose
+    TITLE names the company itself.
+
+    That second filter matters because Naver's search does loose,
+    group-wide matching, not exact-phrase (confirmed empirically — quoting
+    the company name in the query made no difference): most results for
+    e.g. "LG에너지솔루션" only mention it in passing within a story mainly
+    about a different group affiliate (LG전자, LG디스플레이, ...) or the
+    group as a whole. Requiring the company's own name in the title is the
+    only mechanically reliable signal that an article is actually about
+    that company rather than just co-mentioning it — confirmed on real
+    keyword-narrowed queries to keep a real, useful fraction (2-17%,
+    articles like "LG에너지솔루션, 2분기 영업익 1133억…전년비 77%↓"), unlike
+    a bare company-name-only query where this dropped to ~1%. Returns the
     filtered raw provider dicts plus one coverage line per variant query."""
     keywords = search_keywords_for(source_type, source_id)[:MAX_KEYWORD_VARIANTS]
     variant_queries = keywords or [None]
@@ -80,7 +93,12 @@ def fetch_articles_for_pattern(
         search_desc = f"'{company} {keyword}'" if keyword else f"'{company}'"
         coverage_lines.append(f"{search_desc}: {coverage_message(raw_results, date_from)}")
 
-    return filter_by_date_range(list(merged.values()), date_from, date_to), coverage_lines
+    in_range = filter_by_date_range(list(merged.values()), date_from, date_to)
+    on_topic = [r for r in in_range if company in r.get("title", "")]
+    coverage_lines.append(
+        f"제목에 '{company}'가 포함된 기사만 사용: {len(on_topic)}건 (날짜 범위 내 {len(in_range)}건 중)"
+    )
+    return on_topic, coverage_lines
 
 
 def fetch_and_rank_evidence(
