@@ -57,6 +57,21 @@ RULE_QUESTION_TEMPLATES: dict[str, list[str]] = {
     "SALES_UP_INVENTORY_UP_FASTER": ["재고가 매출보다 빠르게 증가한 이유는 무엇인가?"],
     "CAPEX_UP_DEPRECIATION_FLAT": ["신규 유형자산의 가동 개시 시점은 언제인가?"],
     "BORROWINGS_UP_INTEREST_FLAT": ["신규 차입 시점과 금리 조건은 어떠한가?"],
+    "PAYABLES_DOWN_INVENTORY_UP": ["공급처와의 거래조건(결제조건)이 변경되었는가?"],
+    "CASH_DOWN_BORROWINGS_UP": ["현금 유동성에 문제가 있어 외부 차입에 의존하고 있는가?"],
+    "SALES_UP_MARGIN_DOWN": ["가격 경쟁이나 원가 상승 등 수익성 저하 원인은 무엇인가?"],
+    "INTANGIBLE_UP_OCF_FLAT": ["연구개발비 등 비용을 자산으로 처리(자본화)한 내역이 있는가?"],
+    "RETAINED_EARNINGS_UP_NO_DIVIDEND_SIGNAL": ["배당정책에 변화가 있었는가? 유보된 이익의 사용 계획은 무엇인가?"],
+    "CAPITAL_SURPLUS_UP_BORROWINGS_FLAT": ["유상증자 등으로 조달한 자금은 어디에 사용되었는가?"],
+    "INCOME_TAX_SWING_PRETAX_FLAT": ["실효세율 변동이나 일회성 세무조정이 있었는가?"],
+    "RECEIVABLE_UP_ALLOWANCE_LAGGING": ["대손충당금 설정 기준(대손율)이 변경되었는가?"],
+    "PAYABLES_UP_COGS_FLAT": ["매입 조건이나 재고 축적 전략에 변화가 있었는가?"],
+    "TANGIBLE_ASSETS_UP_DEPRECIATION_FLAT": ["신규 설비의 가동 개시 시점은 언제인가?"],
+    "OCI_SWING_NET_INCOME_FLAT": ["공정가치평가나 해외사업환산 등 기타포괄손익 변동 원인은 무엇인가?"],
+    "INVENTORY_UP_COGS_FLAT": ["재고 회전율 저하나 판매 부진, 진부화 위험이 있는가?"],
+    "ST_BORROWINGS_UP_LT_BORROWINGS_DOWN": ["장기차입금을 단기로 차환한 이유와 만기 리스크는 무엇인가?"],
+    "TAX_PAYABLE_UP_TAX_EXPENSE_FLAT": ["법인세 납부가 지연되고 있는가? 세무조사 등 이슈가 있는가?"],
+    "EQUITY_METHOD_INVESTMENT_UP_GAIN_LOSS_SWING": ["지분법 적용회사의 실적 변화나 투자 회수 계획이 있는가?"],
 }
 
 # source_id -> keywords that must appear (substring match) somewhere in a
@@ -87,6 +102,21 @@ RULE_TOPIC_KEYWORDS: dict[str, list[str]] = {
     "SALES_UP_INVENTORY_UP_FASTER": ["재고자산", "재고 증가", "판매 부진"],
     "CAPEX_UP_DEPRECIATION_FLAT": ["가동", "준공", "시운전", "유형자산 취득"],
     "BORROWINGS_UP_INTEREST_FLAT": ["차입금", "이자율", "차입 조건", "금리"],
+    "PAYABLES_DOWN_INVENTORY_UP": ["매입채무", "결제조건", "공급처"],
+    "CASH_DOWN_BORROWINGS_UP": ["현금", "유동성", "차입금"],
+    "SALES_UP_MARGIN_DOWN": ["매출총이익률", "마진", "원가 상승", "가격 경쟁"],
+    "INTANGIBLE_UP_OCF_FLAT": ["무형자산", "연구개발비", "자본화"],
+    "RETAINED_EARNINGS_UP_NO_DIVIDEND_SIGNAL": ["배당", "이익잉여금", "자사주"],
+    "CAPITAL_SURPLUS_UP_BORROWINGS_FLAT": ["유상증자", "자본잉여금", "자금조달"],
+    "INCOME_TAX_SWING_PRETAX_FLAT": ["법인세", "실효세율", "세무조정", "이연법인세"],
+    "RECEIVABLE_UP_ALLOWANCE_LAGGING": ["대손충당금", "대손율", "매출채권"],
+    "PAYABLES_UP_COGS_FLAT": ["매입채무", "매입", "재고"],
+    "TANGIBLE_ASSETS_UP_DEPRECIATION_FLAT": ["가동", "준공", "시운전", "유형자산 취득"],
+    "OCI_SWING_NET_INCOME_FLAT": ["기타포괄손익", "공정가치평가", "해외사업환산"],
+    "INVENTORY_UP_COGS_FLAT": ["재고", "재고자산", "재고회전율", "판매 부진"],
+    "ST_BORROWINGS_UP_LT_BORROWINGS_DOWN": ["차입금", "차환", "만기", "단기차입금", "장기차입금"],
+    "TAX_PAYABLE_UP_TAX_EXPENSE_FLAT": ["미지급법인세", "법인세", "세무조사"],
+    "EQUITY_METHOD_INVESTMENT_UP_GAIN_LOSS_SWING": ["지분법", "관계기업", "공동기업", "투자자산"],
 }
 
 

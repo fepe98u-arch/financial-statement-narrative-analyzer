@@ -56,25 +56,37 @@ def test_noncurrent_borrowings_synonym_maps_to_lt_borrowings():
     assert result.mapping_method == MappingMethod.ACCOUNT_DICTIONARY
 
 
-def test_current_borrowings_does_not_false_positive_as_lt_borrowings():
+def test_current_borrowings_maps_to_its_own_code_not_lt_borrowings():
     # "유동성차입금" (current/short-term portion) is a near-total substring
-    # of "비유동성차입금" (added above as LT_BORROWINGS' synonym for the
-    # long-term/non-current portion) — they mean opposite things but
-    # differ by only one leading character, and rapidfuzz's WRatio scores
-    # the pair ~92 (above the UI's >90.0 auto-accept line) despite that.
+    # of "비유동성차입금" (LT_BORROWINGS' synonym for the long-term/
+    # non-current portion) — they mean opposite things but differ by only
+    # one leading character, and rapidfuzz's WRatio would score the pair
+    # ~92 (above the UI's >90.0 auto-accept line) if this fell through to
+    # fuzzy matching. It has its own exact dictionary entry instead.
     result = normalize_account_name("유동성차입금")
-    assert result.canonical_account_code is None
-    assert result.mapping_method == MappingMethod.UNRESOLVED
+    assert result.canonical_account_code == "ST_BORROWINGS"
+    assert result.mapping_method == MappingMethod.ACCOUNT_DICTIONARY
+
+
+def test_pretax_income_qualifier_suffix_is_stripped_before_exact_match():
+    # PRETAX_INCOME was added once INCOME_TAX_SWING_PRETAX_FLAT (one of the
+    # 15 new relationship rules) needed it — "법인세비용차감전순이익" now has
+    # a real canonical home, so the "(손실)" qualifier stripping should
+    # resolve it confidently, the same as it already does for 당기순이익.
+    result = normalize_account_name("법인세비용차감전순이익(손실)")
+    assert result.canonical_account_code == "PRETAX_INCOME"
+    assert result.mapping_method == MappingMethod.EXACT
 
 
 def test_loss_qualifier_stripping_does_not_invent_matches_for_distinct_concepts():
-    # "법인세비용차감전순이익" (profit before tax) is genuinely not the
-    # same thing as net income — stripping "(손실)" must not promote it to
-    # a confident ACCOUNT_DICTIONARY/EXACT match the way it correctly does
-    # for "당기순이익(손실)". It can still surface as a low-stakes FUZZY
+    # "재고자산평가손실" (inventory valuation loss, an income-statement
+    # item) is genuinely not the same thing as INVENTORY (the balance-sheet
+    # asset) — stripping "(손실)" must not promote it to a confident
+    # ACCOUNT_DICTIONARY/EXACT match the way it correctly does for
+    # "당기순이익(손실)". It can still surface as a low-stakes FUZZY
     # suggestion (for a human to review in the mapping table) — it just
     # must stay capped at the same 90.0 ceiling as any other coincidental
     # substring match, never treated as confirmed.
-    result = normalize_account_name("법인세비용차감전순이익(손실)")
+    result = normalize_account_name("재고자산평가손실(손실)")
     assert result.mapping_method == MappingMethod.FUZZY
     assert result.mapping_confidence == 90.0

@@ -55,6 +55,128 @@ def test_abc_manufacturing_triggers_production_expansion_narrative_pattern():
     assert "CAPEX_FINANCING" in patterns
 
 
+def test_payables_down_inventory_up_rule_fires():
+    year_map = {"PAYABLES": {2024: 100, 2025: 90}, "INVENTORY": {2024: 100, 2025: 110}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "PAYABLES_DOWN_INVENTORY_UP" in hits
+
+
+def test_cash_down_borrowings_up_rule_fires():
+    year_map = {"CASH": {2024: 100, 2025: 90}, "LT_BORROWINGS": {2024: 100, 2025: 110}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "CASH_DOWN_BORROWINGS_UP" in hits
+
+
+def test_sales_up_margin_down_rule_fires():
+    # prior margin (1000-600)/1000=40%, latest margin (1100-700)/1100=36.4% -> 3.6pp drop
+    year_map = {"SALES": {2024: 1000, 2025: 1100}, "COGS": {2024: 600, 2025: 700}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "SALES_UP_MARGIN_DOWN" in hits
+
+
+def test_sales_up_margin_down_rule_silent_when_margin_holds():
+    # Same 10% sales growth, but COGS grows in exact proportion — margin unchanged.
+    year_map = {"SALES": {2024: 1000, 2025: 1100}, "COGS": {2024: 600, 2025: 660}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "SALES_UP_MARGIN_DOWN" not in hits
+
+
+def test_intangible_up_ocf_flat_rule_fires():
+    year_map = {"INTANGIBLE_ASSETS": {2024: 100, 2025: 125}, "OPERATING_CF": {2024: 100, 2025: 102}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "INTANGIBLE_UP_OCF_FLAT" in hits
+
+
+def test_retained_earnings_up_no_dividend_signal_rule_fires():
+    # Retained earnings grew by 100, net income was 105 -> ~95% absorbed, no material outflow.
+    year_map = {"RETAINED_EARNINGS": {2024: 1000, 2025: 1100}, "NET_INCOME": {2024: 100, 2025: 105}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "RETAINED_EARNINGS_UP_NO_DIVIDEND_SIGNAL" in hits
+
+
+def test_retained_earnings_up_no_dividend_signal_rule_silent_when_payout_is_material():
+    # Retained earnings only grew by 40 out of 105 net income -> ~62 was paid out/used elsewhere.
+    year_map = {"RETAINED_EARNINGS": {2024: 1000, 2025: 1040}, "NET_INCOME": {2024: 100, 2025: 105}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "RETAINED_EARNINGS_UP_NO_DIVIDEND_SIGNAL" not in hits
+
+
+def test_capital_surplus_up_borrowings_flat_rule_fires():
+    year_map = {"CAPITAL_SURPLUS": {2024: 100, 2025: 125}, "LT_BORROWINGS": {2024: 100, 2025: 102}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "CAPITAL_SURPLUS_UP_BORROWINGS_FLAT" in hits
+
+
+def test_income_tax_swing_pretax_flat_rule_fires():
+    year_map = {"INCOME_TAX_EXPENSE": {2024: 100, 2025: 125}, "PRETAX_INCOME": {2024: 100, 2025: 102}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "INCOME_TAX_SWING_PRETAX_FLAT" in hits
+
+
+def test_receivable_up_allowance_lagging_rule_fires():
+    year_map = {"RECEIVABLE": {2024: 100, 2025: 110}, "ALLOWANCE_DOUBTFUL": {2024: 100, 2025: 102}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "RECEIVABLE_UP_ALLOWANCE_LAGGING" in hits
+
+
+def test_payables_up_cogs_flat_rule_fires():
+    year_map = {"PAYABLES": {2024: 100, 2025: 110}, "COGS": {2024: 100, 2025: 102}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "PAYABLES_UP_COGS_FLAT" in hits
+
+
+def test_tangible_assets_up_depreciation_flat_rule_fires():
+    year_map = {"TANGIBLE_ASSETS": {2024: 100, 2025: 125}, "DEPRECIATION": {2024: 100, 2025: 105}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "TANGIBLE_ASSETS_UP_DEPRECIATION_FLAT" in hits
+
+
+def test_oci_swing_net_income_flat_rule_fires():
+    # OCI swung by 50 (from -10 to +40), against a net income base of 100 -> 50% materiality ratio.
+    year_map = {
+        "OTHER_COMPREHENSIVE_INCOME": {2024: -10, 2025: 40},
+        "NET_INCOME": {2024: 95, 2025: 100},
+    }
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "OCI_SWING_NET_INCOME_FLAT" in hits
+
+
+def test_oci_swing_net_income_flat_rule_silent_when_swing_is_immaterial():
+    year_map = {
+        "OTHER_COMPREHENSIVE_INCOME": {2024: -10, 2025: -12},
+        "NET_INCOME": {2024: 95, 2025: 100},
+    }
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "OCI_SWING_NET_INCOME_FLAT" not in hits
+
+
+def test_inventory_up_cogs_flat_rule_fires():
+    year_map = {"INVENTORY": {2024: 100, 2025: 110}, "COGS": {2024: 100, 2025: 102}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "INVENTORY_UP_COGS_FLAT" in hits
+
+
+def test_st_borrowings_up_lt_borrowings_down_rule_fires():
+    year_map = {"ST_BORROWINGS": {2024: 100, 2025: 110}, "LT_BORROWINGS": {2024: 100, 2025: 90}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "ST_BORROWINGS_UP_LT_BORROWINGS_DOWN" in hits
+
+
+def test_tax_payable_up_tax_expense_flat_rule_fires():
+    year_map = {"TAX_PAYABLE": {2024: 100, 2025: 125}, "INCOME_TAX_EXPENSE": {2024: 100, 2025: 102}}
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "TAX_PAYABLE_UP_TAX_EXPENSE_FLAT" in hits
+
+
+def test_equity_method_investment_up_gain_loss_swing_rule_fires():
+    year_map = {
+        "EQUITY_METHOD_INVESTMENT": {2024: 100, 2025: 110},
+        "EQUITY_METHOD_GAIN_LOSS": {2024: 100, 2025: 130},
+    }
+    hits = {hit.rule_id for hit in detect_relationship_rules(year_map, 2025, 2024)}
+    assert "EQUITY_METHOD_INVESTMENT_UP_GAIN_LOSS_SWING" in hits
+
+
 def test_tangible_assets_fallback_fires_when_granular_capex_accounts_are_absent():
     # Real DART filings via the summary API (fnlttSinglAcntAll) report
     # 유형자산 as one combined line, not broken into

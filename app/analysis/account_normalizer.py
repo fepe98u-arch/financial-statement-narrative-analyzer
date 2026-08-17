@@ -58,18 +58,39 @@ ACCOUNT_DICTIONARY: dict[str, str] = {
     "장기차입금(원화)": "LT_BORROWINGS",
     # DART's summary statement often reports the long-term portion as
     # "비유동성차입금" rather than "장기차입금" — same concept, different
-    # label. "유동성차입금" (the current/short-term portion) is deliberately
-    # NOT mapped here — it's a different concept, not a synonym.
+    # label.
     "비유동성차입금": "LT_BORROWINGS",
+    # The current/short-term portion — a different concept from the two
+    # above (see _FUZZY_MATCH_BLOCKLIST below for why this needs its own
+    # exact entry rather than being left to fuzzy matching).
+    "유동성차입금": "ST_BORROWINGS",
+    "단기차입금": "ST_BORROWINGS",
     "이자비용": "INTEREST_EXPENSE",
     "영업활동현금흐름": "OPERATING_CF",
     "영업활동으로인한현금흐름": "OPERATING_CF",
+    "현금및현금성자산": "CASH",
     "영업이익": "OPERATING_PROFIT",
     "순이익": "NET_INCOME",
     "당기순이익": "NET_INCOME",
+    "법인세비용차감전순이익": "PRETAX_INCOME",
+    "법인세비용차감전이익": "PRETAX_INCOME",
     "대손충당금": "ALLOWANCE_DOUBTFUL",
     "총자산": "TOTAL_ASSETS",
     "자산총계": "TOTAL_ASSETS",
+    "매입채무": "PAYABLES",
+    "무형자산": "INTANGIBLE_ASSETS",
+    "이익잉여금": "RETAINED_EARNINGS",
+    "이익잉여금(결손금)": "RETAINED_EARNINGS",
+    "자본잉여금": "CAPITAL_SURPLUS",
+    "법인세비용": "INCOME_TAX_EXPENSE",
+    "법인세비용(수익)": "INCOME_TAX_EXPENSE",
+    "미지급법인세": "TAX_PAYABLE",
+    "기타포괄손익": "OTHER_COMPREHENSIVE_INCOME",
+    "관계기업및공동기업투자자산": "EQUITY_METHOD_INVESTMENT",
+    "관계기업 및 공동기업투자자산": "EQUITY_METHOD_INVESTMENT",
+    "지분법이익": "EQUITY_METHOD_GAIN_LOSS",
+    "지분법손실": "EQUITY_METHOD_GAIN_LOSS",
+    "지분법손익": "EQUITY_METHOD_GAIN_LOSS",
 }
 
 FUZZY_HIGH_CONFIDENCE = 90.0
@@ -77,17 +98,16 @@ FUZZY_LOW_CONFIDENCE = 70.0
 
 # Raw label -> codes it must never resolve to via fuzzy matching, even
 # though rapidfuzz's substring-based scoring pushes it above the auto-accept
-# threshold. "유동성차입금" (current/short-term portion of borrowings) is a
-# near-total substring of "비유동성차입금" (added to ACCOUNT_DICTIONARY as
-# LT_BORROWINGS' synonym for the long-term/non-current portion) — they
+# threshold. Empirically discovered: "유동성차입금" (current/short-term
+# portion of borrowings) is a near-total substring of "비유동성차입금"
+# (LT_BORROWINGS' synonym for the long-term/non-current portion) — they
 # differ by one leading character ("비") but mean opposite things, and
-# WRatio scores the pair ~92 despite that. Confirmed empirically: without
-# "비유동성차입금" in the dictionary this scored 54.5 (safely unresolved);
-# adding it pushed "유동성차입금" up to 92.3 (would have silently
-# auto-accepted as LT_BORROWINGS).
-_FUZZY_MATCH_BLOCKLIST: dict[str, frozenset[str]] = {
-    "유동성차입금": frozenset({"LT_BORROWINGS"}),
-}
+# WRatio scored the pair ~92 (above the auto-accept line) once
+# "비유동성차입금" was added to the dictionary. "유동성차입금" now has its
+# own exact ACCOUNT_DICTIONARY entry (-> ST_BORROWINGS) so this specific
+# case never reaches fuzzy matching anymore, but the mechanism stays as a
+# safety net for the next confusable pair like this.
+_FUZZY_MATCH_BLOCKLIST: dict[str, frozenset[str]] = {}
 
 
 class MappingMethod(str, Enum):
