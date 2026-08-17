@@ -163,6 +163,28 @@ def _parse_pub_date(raw: str | None) -> date | None:
         return None
 
 
+def filter_by_date_range(results: list[dict], date_from: str, date_to: str) -> list[dict]:
+    """Naver's search results are NOT actually restricted to date_from/
+    date_to (the API has no such parameter — see the module docstring), so
+    a sort=date fetch can return articles many years outside the window a
+    caller cares about. This is a real, enforced filter (unlike
+    coverage_message, which only reports) — applied before ranking so an
+    old, chronologically-irrelevant article can't outscore a genuinely
+    on-topic one just because it happens to use similar vocabulary.
+    Articles with an unparseable date are dropped rather than assumed
+    in-range."""
+    try:
+        start, end = date.fromisoformat(date_from), date.fromisoformat(date_to)
+    except ValueError:
+        return results
+    kept = []
+    for r in results:
+        d = _parse_pub_date(r.get("published_at"))
+        if d is not None and start <= d <= end:
+            kept.append(r)
+    return kept
+
+
 def coverage_message(results: list[dict], requested_date_from: str) -> str:
     """Naver's News Search API has no date-range filter parameter and caps
     at 1,000 results total (fetch_many's own NAVER_MAX_PAGES limit) — for a

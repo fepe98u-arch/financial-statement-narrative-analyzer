@@ -7,9 +7,9 @@ concluded rather than just what it's curious about.
 from __future__ import annotations
 
 from app.analysis.investigation_questions import (
-    NARRATIVE_SEARCH_KEYWORD,
-    RULE_SEARCH_KEYWORD,
-    search_keyword_for,
+    NARRATIVE_SEARCH_KEYWORDS,
+    RULE_SEARCH_KEYWORDS,
+    search_keywords_for,
 )
 
 # Substrings that would turn a bare account name into a directional/judgment
@@ -21,22 +21,23 @@ _FORBIDDEN_SUBSTRINGS = (
 
 
 def test_search_keywords_contain_no_directional_or_judgment_words():
-    all_keywords = {**NARRATIVE_SEARCH_KEYWORD, **RULE_SEARCH_KEYWORD}
-    for source_id, keyword in all_keywords.items():
-        for forbidden in _FORBIDDEN_SUBSTRINGS:
-            assert forbidden not in keyword, (
-                f"{source_id}'s search keyword {keyword!r} contains {forbidden!r} — "
-                "search_keyword_for() values must be bare account names only"
-            )
+    all_keyword_lists = {**NARRATIVE_SEARCH_KEYWORDS, **RULE_SEARCH_KEYWORDS}
+    for source_id, keywords in all_keyword_lists.items():
+        for keyword in keywords:
+            for forbidden in _FORBIDDEN_SUBSTRINGS:
+                assert forbidden not in keyword, (
+                    f"{source_id}'s search keyword {keyword!r} contains {forbidden!r} — "
+                    "search_keywords_for() values must be bare account names only"
+                )
 
 
-def test_search_keyword_for_rule_returns_expected_value():
-    assert search_keyword_for("RELATIONSHIP_RULE", "BORROWINGS_UP_INTEREST_FLAT") == "이자비용"
+def test_search_keywords_for_rule_returns_expected_variants():
+    assert search_keywords_for("RELATIONSHIP_RULE", "BORROWINGS_UP_INTEREST_FLAT") == ["이자비용", "금융비용"]
 
 
-def test_search_keyword_for_narrative_returns_expected_value():
-    assert search_keyword_for("NARRATIVE_PATTERN", "CREDIT_RISK") == "대손충당금"
+def test_search_keywords_for_narrative_returns_expected_variants():
+    assert search_keywords_for("NARRATIVE_PATTERN", "CREDIT_RISK") == ["대손충당금"]
 
 
-def test_search_keyword_for_unknown_source_returns_none():
-    assert search_keyword_for("RELATIONSHIP_RULE", "SOME_FUTURE_RULE_WITH_NO_ENTRY_YET") is None
+def test_search_keywords_for_unknown_source_returns_empty_list():
+    assert search_keywords_for("RELATIONSHIP_RULE", "SOME_FUTURE_RULE_WITH_NO_ENTRY_YET") == []

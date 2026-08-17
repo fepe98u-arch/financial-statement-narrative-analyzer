@@ -25,23 +25,19 @@ from PySide6.QtWidgets import (
 )
 
 from app.analysis.embedding_engine import LocalModelNotInstalledError, load_model
+from app.analysis.evidence_fetch import evidence_lookup_for_hits, fetch_articles_for_pattern
 from app.analysis.evidence_ranking import (
     EvidenceClassification,
     documents_from_provider_results,
     rank_public_evidence,
 )
-from app.analysis.investigation_questions import (
-    generate_investigation_questions,
-    search_keyword_for,
-    topic_keywords_for,
-)
-from app.analysis.narrative_patterns import detect_narrative_patterns
-from app.analysis.relationship_rules import detect_relationship_rules
+from app.analysis.investigation_questions import generate_investigation_questions, topic_keywords_for
+from app.analysis.narrative_patterns import NarrativePatternHit, detect_narrative_patterns
+from app.analysis.relationship_rules import RelationshipRuleHit, detect_relationship_rules
 from app.config import get_local_ai_model_path, load_settings, save_settings, set_local_ai_model_path
 from app.data.loader import list_companies, load_financial_facts, to_year_map, years_for_company
 from app.data.synthetic_public_documents import documents_for_company
-from app.public_data_collector.news_provider import MissingCredentialError, NaverNewsProvider, coverage_message
-from app.public_data_collector.schemas import PublicCollectionRequest
+from app.public_data_collector.news_provider import MissingCredentialError
 
 CLASSIFICATION_COLORS = {
     EvidenceClassification.POSSIBLE: "#1565c0",
@@ -174,37 +170,39 @@ class EvidenceAnalysisPage(QWidget):
             return
 
         today = date.today()
-        date_from = date(today.year, 1, 1).isoformat()
+        # The analysis window is the fiscal years actually being compared
+        # (prior year onward), not "this calendar year" — articles
+        # explaining a FY latest move can be published during FY prior/
+        # latest themselves, or in the following year when annual results
+        # are reported and analyzed.
+        date_from = date(prior, 1, 1).isoformat()
         date_to = today.isoformat()
 
-        # One fetch PER pattern (top 2), each narrowed by that pattern's own
-        # pre-approved keyword — same reasoning as public_data_page.py's
-        # _run_real_fetch. Merged into one document pool afterward so
-        # _render() (a pure re-render, called on every company switch) keeps
-        # working unchanged — it still does its own per-pattern local
-        # keyword-gating and cross-pattern dedup on whatever's here.
+        # One fetch PER pattern (top 2), each trying that pattern's own
+        # pre-approved keyword variants — same reasoning as
+        # public_data_page.py's _run_real_fetch. Merged into one document
+        # pool afterward so _render() (a pure re-render, called on every
+        # company switch) keeps working unchanged — it still does its own
+        # per-pattern local keyword-gating and cross-pattern dedup on
+        # whatever's here.
         merged: dict[str, dict] = {}
         coverage_lines = []
-        for qs in question_sets[:2]:
-            keyword = search_keyword_for(qs.source_type, qs.source_id)
-            request = PublicCollectionRequest(
-                public_company_name=company, date_from=date_from, date_to=date_to, page=1, page_size=100,
-                topic_keyword=keyword,
-            )
-            QApplication.processEvents()
-            try:
-                results = NaverNewsProvider().fetch_many(request)
-            except MissingCredentialError as exc:
-                QMessageBox.warning(self, "네이버 API 키 필요", str(exc))
-                return
-            except Exception as exc:  # network/API errors — surface plainly
-                QMessageBox.warning(self, "조회 실패", str(exc))
-                return
-            for r in results:
-                key = r.get("public_document_id") or r.get("url") or r.get("title")
-                merged.setdefault(key, r)
-            search_desc = f"'{company} {keyword}'" if keyword else f"'{company}'"
-            coverage_lines.append(f"{search_desc}: {coverage_message(results, date_from)}")
+        try:
+            for qs in question_sets[:2]:
+                QApplication.processEvents()
+                in_range, pattern_coverage = fetch_articles_for_pattern(
+                    company, qs.source_type, qs.source_id, date_from, date_to
+                )
+                for r in in_range:
+                    key = r.get("public_document_id") or r.get("url") or r.get("title")
+                    merged.setdefault(key, r)
+                coverage_lines.extend(pattern_coverage)
+        except MissingCredentialError as exc:
+            QMessageBox.warning(self, "네이버 API 키 필요", str(exc))
+            return
+        except Exception as exc:  # network/API errors — surface plainly
+            QMessageBox.warning(self, "조회 실패", str(exc))
+            return
 
         self._real_documents_by_company[company] = documents_from_provider_results(list(merged.values()))
         self._real_fetch_coverage_by_company[company] = "\n".join(coverage_lines)
@@ -271,10 +269,12 @@ class EvidenceAnalysisPage(QWidget):
         # keywords overlap across two patterns, e.g. "지분법") could appear
         # under every pattern it happens to pass the keyword gate for,
         # which defeats the point of separating them by pattern at all.
+        evidence_lookup = evidence_lookup_for_hits(narrative_hits, rule_hits)
         claimed_document_ids: set[str] = set()
         for qs in question_sets[:2]:  # keep the page readable — top 2 pattern sources
             for question in qs.questions[:1]:  # one representative question per source
-                self._content_layout.addWidget(self._question_header(question))
+                evidence = evidence_lookup.get((qs.source_type, qs.source_id), {})
+                self._content_layout.addWidget(self._question_header(question, evidence))
                 keywords = topic_keywords_for(qs.source_type, qs.source_id)
                 unclaimed_documents = [d for d in documents if d.public_document_id not in claimed_document_ids]
                 matches = rank_public_evidence(
@@ -290,8 +290,12 @@ class EvidenceAnalysisPage(QWidget):
 
         self._content_layout.addStretch()
 
-    def _question_header(self, question: str) -> QLabel:
-        label = QLabel(f"Investigation Question: {question}")
+    def _question_header(self, question: str, evidence: dict[str, float] | None = None) -> QLabel:
+        evidence_text = ", ".join(f"{k} {v:+.1f}%" for k, v in (evidence or {}).items())
+        text = f"Investigation Question: {question}"
+        if evidence_text:
+            text += f"\n탐지된 변동: {evidence_text}"
+        label = QLabel(text)
         label.setStyleSheet(
             "font-weight: bold; background-color: #eeeeee; padding: 6px;"
             " border-radius: 4px; margin-top: 10px;"
