@@ -21,6 +21,8 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import replace
+from datetime import date
+from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -137,3 +139,38 @@ class NaverNewsProvider(PublicDataProvider):
                 break
 
         return _deduplicate(all_results)
+
+
+def _parse_pub_date(raw: str | None) -> date | None:
+    if not raw:
+        return None
+    try:
+        return parsedate_to_datetime(raw).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def coverage_message(results: list[dict], requested_date_from: str) -> str:
+    """Naver's News Search API has no date-range filter parameter and caps
+    at 1,000 results total (fetch_many's own NAVER_MAX_PAGES limit) — for a
+    heavily-covered company that 1,000-article budget can be consumed by
+    just the last few days, never reaching back to the requested start
+    date. Rather than silently showing a partial window, this reports
+    exactly how far back the fetch actually reached so that gap is visible,
+    not assumed away."""
+    dates = [_parse_pub_date(r.get("published_at")) for r in results]
+    dates = [d for d in dates if d is not None]
+    if not dates:
+        return ""
+    earliest, latest = min(dates), max(dates)
+    try:
+        requested_from = date.fromisoformat(requested_date_from)
+    except ValueError:
+        return f"실제 수집된 기사 날짜 범위: {earliest} ~ {latest}"
+    if earliest > requested_from:
+        return (
+            f"⚠ 실제로 도달한 기사 날짜 범위: {earliest} ~ {latest} — 요청하신 시작일({requested_from})까지 "
+            "도달하지 못했습니다. 네이버 뉴스 검색은 날짜 범위 지정 기능이 없고 최대 1,000건까지만 조회할 수 "
+            "있어서, 기사가 많이 나오는 회사는 최근 며칠치만 이 한도 안에 들어올 수 있습니다."
+        )
+    return f"실제 수집된 기사 날짜 범위: {earliest} ~ {latest} (요청 범위 전체 커버됨)"

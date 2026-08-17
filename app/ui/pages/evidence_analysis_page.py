@@ -8,8 +8,10 @@ local model folder — it never tries to download one itself.
 from __future__ import annotations
 
 import html
+from datetime import date
 
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -34,7 +36,7 @@ from app.analysis.relationship_rules import detect_relationship_rules
 from app.config import get_local_ai_model_path, load_settings, save_settings, set_local_ai_model_path
 from app.data.loader import list_companies, load_financial_facts, to_year_map, years_for_company
 from app.data.synthetic_public_documents import documents_for_company
-from app.public_data_collector.news_provider import MissingCredentialError, NaverNewsProvider
+from app.public_data_collector.news_provider import MissingCredentialError, NaverNewsProvider, coverage_message
 from app.public_data_collector.schemas import PublicCollectionRequest
 
 CLASSIFICATION_COLORS = {
@@ -57,6 +59,7 @@ class EvidenceAnalysisPage(QWidget):
         self._companies = list_companies(self._facts)
         self._model = None
         self._real_documents_by_company: dict[str, list] = {}
+        self._real_fetch_coverage_by_company: dict[str, str] = {}
 
         outer = QVBoxLayout(self)
 
@@ -152,11 +155,17 @@ class EvidenceAnalysisPage(QWidget):
     def _fetch_real_documents(self, company: str) -> None:
         if not self._ask_consent():
             return
+        today = date.today()
         request = PublicCollectionRequest(
-            public_company_name=company, date_from="2025-01-01", date_to="2026-08-11", page=1, page_size=20
+            public_company_name=company,
+            date_from=date(today.year, 1, 1).isoformat(),
+            date_to=today.isoformat(),
+            page=1,
+            page_size=100,
         )
+        QApplication.processEvents()
         try:
-            results = NaverNewsProvider().fetch(request)
+            results = NaverNewsProvider().fetch_many(request)
         except MissingCredentialError as exc:
             QMessageBox.warning(self, "네이버 API 키 필요", str(exc))
             return
@@ -165,6 +174,7 @@ class EvidenceAnalysisPage(QWidget):
             return
 
         self._real_documents_by_company[company] = documents_from_provider_results(results)
+        self._real_fetch_coverage_by_company[company] = coverage_message(results, request.date_from)
         self._render(company)
 
     def _render(self, company: str) -> None:
@@ -197,10 +207,18 @@ class EvidenceAnalysisPage(QWidget):
         # the local fake-article fixture, no network involved. Anything
         # else (an imported real company) has no such fixture — offer a
         # real fetch instead of just reporting nothing's there.
-        documents = documents_for_company(company) or self._real_documents_by_company.get(company, [])
+        real_documents = self._real_documents_by_company.get(company, [])
+        documents = documents_for_company(company) or real_documents
 
         if not question_sets:
             self._content_layout.addWidget(QLabel("현재 조사 질문이 없어 매칭할 대상이 없습니다."))
+        if documents and documents is real_documents:
+            coverage = self._real_fetch_coverage_by_company.get(company, "")
+            if coverage:
+                coverage_label = QLabel(coverage)
+                coverage_label.setWordWrap(True)
+                coverage_label.setStyleSheet("color: #b71c1c; margin-bottom: 6px;")
+                self._content_layout.addWidget(coverage_label)
         if not documents:
             note = QLabel(
                 "이 회사에 대한 가상 공개자료 예시가 없습니다 (합성 회사 전용). "
@@ -215,12 +233,26 @@ class EvidenceAnalysisPage(QWidget):
             self._content_layout.addStretch()
             return
 
+        # Each article is shown under only the first pattern it matches —
+        # without this, the same article (especially one whose topic
+        # keywords overlap across two patterns, e.g. "지분법") could appear
+        # under every pattern it happens to pass the keyword gate for,
+        # which defeats the point of separating them by pattern at all.
+        claimed_document_ids: set[str] = set()
         for qs in question_sets[:2]:  # keep the page readable — top 2 pattern sources
             for question in qs.questions[:1]:  # one representative question per source
                 self._content_layout.addWidget(self._question_header(question))
                 keywords = topic_keywords_for(qs.source_type, qs.source_id)
-                matches = rank_public_evidence(self._model, question, documents, top_k=3, topic_keywords=keywords)
+                unclaimed_documents = [d for d in documents if d.public_document_id not in claimed_document_ids]
+                matches = rank_public_evidence(
+                    self._model, question, unclaimed_documents, top_k=3, topic_keywords=keywords
+                )
+                if not matches:
+                    empty = QLabel("관련도 높은 기사를 찾지 못했습니다.")
+                    empty.setStyleSheet("color: #777;")
+                    self._content_layout.addWidget(empty)
                 for match in matches:
+                    claimed_document_ids.add(match.document_id)
                     self._content_layout.addWidget(self._evidence_card(match))
 
         self._content_layout.addStretch()

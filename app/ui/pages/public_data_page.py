@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import date
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -40,7 +41,7 @@ from app.config import get_local_ai_model_path, load_settings, save_settings
 from app.data.loader import list_companies, load_financial_facts, to_year_map, years_for_company
 from app.data.synthetic_public_documents import documents_for_company
 from app.public_data_collector.fake_provider import FakeDartProvider, FakeNewsProvider
-from app.public_data_collector.news_provider import MissingCredentialError, NaverNewsProvider
+from app.public_data_collector.news_provider import MissingCredentialError, NaverNewsProvider, coverage_message
 from app.public_data_collector.schemas import PublicCollectionRequest
 
 CONSENT_TEXT = (
@@ -218,8 +219,13 @@ class PublicDataPage(QWidget):
             return
 
         company = self._company_combo.currentText()
+        today = date.today()
         request = PublicCollectionRequest(
-            public_company_name=company, date_from="2025-01-01", date_to="2026-08-11", page=1, page_size=100
+            public_company_name=company,
+            date_from=date(today.year, 1, 1).isoformat(),
+            date_to=today.isoformat(),
+            page=1,
+            page_size=100,
         )
 
         self._real_status_label.setText(
@@ -239,9 +245,10 @@ class PublicDataPage(QWidget):
         finally:
             self._real_fetch_btn.setEnabled(True)
 
+        coverage = coverage_message(results, request.date_from)
         self._real_status_label.setText(
             f"🌐 PUBLIC DATA COLLECTION: IDLE — 실제 기사 {len(results)}건 수집 완료(중복 제거 후, 회사명만 전송됨). "
-            "아래에는 이 중 조사 질문과 관련도 높은 기사만 표시됩니다."
+            "아래에는 이 중 조사 질문과 관련도 높은 기사만 표시됩니다.\n" + coverage
         )
 
         self._render_relevance_ranking(company, results)
@@ -287,6 +294,12 @@ class PublicDataPage(QWidget):
 
         documents = documents_from_provider_results(results)
 
+        # Each article is shown under only the first pattern it matches —
+        # without this, the same article (especially one whose topic
+        # keywords overlap across two patterns, e.g. "지분법") could appear
+        # under every pattern it happens to pass the keyword gate for,
+        # which defeats the point of separating them by pattern at all.
+        claimed_document_ids: set[str] = set()
         for qs in question_sets[:2]:  # keep the page readable — top 2 pattern sources
             question = qs.questions[0]
             header = QLabel(f"Investigation Question: {question}  (로컬 임베딩으로만 판단, 외부 전송 없음)")
@@ -297,7 +310,8 @@ class PublicDataPage(QWidget):
             self._real_results_layout.addWidget(header)
 
             keywords = topic_keywords_for(qs.source_type, qs.source_id)
-            matches = rank_public_evidence(model, question, documents, top_k=3, topic_keywords=keywords)
+            unclaimed_documents = [d for d in documents if d.public_document_id not in claimed_document_ids]
+            matches = rank_public_evidence(model, question, unclaimed_documents, top_k=3, topic_keywords=keywords)
             if not matches:
                 empty = QLabel("관련도 높은 기사를 찾지 못했습니다.")
                 empty.setStyleSheet("color: #777;")
@@ -305,6 +319,7 @@ class PublicDataPage(QWidget):
                 continue
 
             for match in matches:
+                claimed_document_ids.add(match.document_id)
                 card = QFrame()
                 card.setStyleSheet("QFrame { border-left: 4px solid #1565c0; padding: 8px; margin: 4px 0; }")
                 card_layout = QVBoxLayout(card)
