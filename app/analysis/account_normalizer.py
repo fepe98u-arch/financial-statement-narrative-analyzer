@@ -52,9 +52,15 @@ ACCOUNT_DICTIONARY: dict[str, str] = {
     "기계장치": "MACHINERY",
     "기계장치(순액)": "MACHINERY",
     "건설중인자산": "CONSTRUCTION_IN_PROGRESS",
+    "유형자산": "TANGIBLE_ASSETS",
     "감가상각비": "DEPRECIATION",
     "장기차입금": "LT_BORROWINGS",
     "장기차입금(원화)": "LT_BORROWINGS",
+    # DART's summary statement often reports the long-term portion as
+    # "비유동성차입금" rather than "장기차입금" — same concept, different
+    # label. "유동성차입금" (the current/short-term portion) is deliberately
+    # NOT mapped here — it's a different concept, not a synonym.
+    "비유동성차입금": "LT_BORROWINGS",
     "이자비용": "INTEREST_EXPENSE",
     "영업활동현금흐름": "OPERATING_CF",
     "영업활동으로인한현금흐름": "OPERATING_CF",
@@ -68,6 +74,20 @@ ACCOUNT_DICTIONARY: dict[str, str] = {
 
 FUZZY_HIGH_CONFIDENCE = 90.0
 FUZZY_LOW_CONFIDENCE = 70.0
+
+# Raw label -> codes it must never resolve to via fuzzy matching, even
+# though rapidfuzz's substring-based scoring pushes it above the auto-accept
+# threshold. "유동성차입금" (current/short-term portion of borrowings) is a
+# near-total substring of "비유동성차입금" (added to ACCOUNT_DICTIONARY as
+# LT_BORROWINGS' synonym for the long-term/non-current portion) — they
+# differ by one leading character ("비") but mean opposite things, and
+# WRatio scores the pair ~92 despite that. Confirmed empirically: without
+# "비유동성차입금" in the dictionary this scored 54.5 (safely unresolved);
+# adding it pushed "유동성차입금" up to 92.3 (would have silently
+# auto-accepted as LT_BORROWINGS).
+_FUZZY_MATCH_BLOCKLIST: dict[str, frozenset[str]] = {
+    "유동성차입금": frozenset({"LT_BORROWINGS"}),
+}
 
 
 class MappingMethod(str, Enum):
@@ -115,6 +135,8 @@ def normalize_account_name(raw_account_name: str) -> AccountMapping:
     if match is not None:
         matched_label, score, _ = match
         code = ACCOUNT_DICTIONARY[matched_label]
+        if code in _FUZZY_MATCH_BLOCKLIST.get(raw, frozenset()):
+            return AccountMapping(raw, None, None, MappingMethod.UNRESOLVED, 0.0)
         if score >= FUZZY_HIGH_CONFIDENCE:
             return AccountMapping(
                 raw, code, CANONICAL_ACCOUNT_NAMES[code], MappingMethod.FUZZY, round(score, 1)

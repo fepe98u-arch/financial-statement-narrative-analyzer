@@ -26,6 +26,15 @@ class ClusterDefinition:
     directions: dict[str, str]
     min_matched: int
     narrative: str
+    # Used only when `directions` doesn't reach min_matched — e.g. a real
+    # filing that reports 유형자산 as one combined line instead of breaking
+    # it into STRUCTURE/MACHINERY/CONSTRUCTION_IN_PROGRESS (DART's summary
+    # API does this; the detailed breakdown only exists in the filing's
+    # notes). Evaluated as a fully separate, self-contained set — never
+    # merged with `directions` — so a company that somehow has both never
+    # double-counts the same underlying asset growth as two matches.
+    fallback_directions: dict[str, str] | None = None
+    fallback_min_matched: int | None = None
 
 
 CLUSTER_DEFINITIONS: list[ClusterDefinition] = [
@@ -45,6 +54,8 @@ CLUSTER_DEFINITIONS: list[ClusterDefinition] = [
             "이러한 변화가 동일한 사업적 사건이나 사업전략 변화와 관련되어 있는지 "
             "추가적인 설명이 필요할 수 있습니다."
         ),
+        fallback_directions={"INVENTORY": "down", "TANGIBLE_ASSETS": "up", "LT_BORROWINGS": "up"},
+        fallback_min_matched=3,
     ),
     ClusterDefinition(
         cluster_id="CAPEX_FINANCING",
@@ -60,6 +71,8 @@ CLUSTER_DEFINITIONS: list[ClusterDefinition] = [
             "설비 관련 자산과 차입금이 함께 크게 증가했습니다. 신규 시설투자와 "
             "그 자금조달이 서로 연관된 사업적 사건인지 확인이 필요할 수 있습니다."
         ),
+        fallback_directions={"TANGIBLE_ASSETS": "up", "LT_BORROWINGS": "up"},
+        fallback_min_matched=2,
     ),
     ClusterDefinition(
         cluster_id="REVENUE_RECEIVABLE",
@@ -118,22 +131,35 @@ def _priority_score(matched_growths: list[float], matched_count: int) -> float:
     return round(min(score, 100.0), 1)
 
 
+def _evaluate_directions(
+    directions: dict[str, str], year_map: YearMap, latest: int, prior: int
+) -> tuple[list[float], dict[str, float]]:
+    matched_growths: list[float] = []
+    matched_accounts: dict[str, float] = {}
+    for code, direction in directions.items():
+        growth = growth_rate(year_map, code, latest, prior)
+        if growth is None:
+            continue
+        if _matches_direction(growth, direction):
+            matched_growths.append(growth)
+            matched_accounts[CANONICAL_ACCOUNT_NAMES.get(code, code)] = growth
+    return matched_growths, matched_accounts
+
+
 def detect_narrative_patterns(year_map: YearMap, latest: int, prior: int) -> list[NarrativePatternHit]:
     hits: list[NarrativePatternHit] = []
 
     for cluster in CLUSTER_DEFINITIONS:
-        matched_growths: list[float] = []
-        matched_accounts: dict[str, float] = {}
+        matched_growths, matched_accounts = _evaluate_directions(cluster.directions, year_map, latest, prior)
+        min_needed = cluster.min_matched
 
-        for code, direction in cluster.directions.items():
-            growth = growth_rate(year_map, code, latest, prior)
-            if growth is None:
-                continue
-            if _matches_direction(growth, direction):
-                matched_growths.append(growth)
-                matched_accounts[CANONICAL_ACCOUNT_NAMES.get(code, code)] = growth
+        if len(matched_growths) < min_needed and cluster.fallback_directions:
+            fb_growths, fb_accounts = _evaluate_directions(cluster.fallback_directions, year_map, latest, prior)
+            if len(fb_growths) >= cluster.fallback_min_matched:
+                matched_growths, matched_accounts = fb_growths, fb_accounts
+                min_needed = cluster.fallback_min_matched
 
-        if len(matched_growths) >= cluster.min_matched:
+        if len(matched_growths) >= min_needed:
             hits.append(
                 NarrativePatternHit(
                     cluster_id=cluster.cluster_id,

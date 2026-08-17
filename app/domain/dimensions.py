@@ -33,6 +33,7 @@ ACCOUNT_DIMENSION: dict[str, BusinessDimension] = {
     "STRUCTURE": BusinessDimension.CAPEX,
     "MACHINERY": BusinessDimension.CAPEX,
     "CONSTRUCTION_IN_PROGRESS": BusinessDimension.CAPEX,
+    "TANGIBLE_ASSETS": BusinessDimension.CAPEX,
     "DEPRECIATION": BusinessDimension.CAPEX,
     "LT_BORROWINGS": BusinessDimension.FINANCING,
     "INTEREST_EXPENSE": BusinessDimension.FINANCING,
@@ -52,6 +53,13 @@ CANONICAL_ACCOUNT_NAMES: dict[str, str] = {
     "STRUCTURE": "구축물",
     "MACHINERY": "기계장치",
     "CONSTRUCTION_IN_PROGRESS": "건설중인자산",
+    # DART's summary financial-statement API (fnlttSinglAcntAll, what the
+    # DART import currently uses) reports 유형자산 as a single combined
+    # line — the STRUCTURE/MACHINERY/CONSTRUCTION_IN_PROGRESS breakdown only
+    # exists in the filing's notes, a different data source. TANGIBLE_ASSETS
+    # is the coarser combined figure narrative_patterns.py falls back to for
+    # companies where that breakdown isn't available.
+    "TANGIBLE_ASSETS": "유형자산",
     "DEPRECIATION": "감가상각비",
     "LT_BORROWINGS": "장기차입금",
     "INTEREST_EXPENSE": "이자비용",
@@ -91,6 +99,7 @@ PREFERRED_STATEMENT_SECTIONS: dict[str, str] = {
     "STRUCTURE": "BS",
     "MACHINERY": "BS",
     "CONSTRUCTION_IN_PROGRESS": "BS",
+    "TANGIBLE_ASSETS": "BS",
     "LT_BORROWINGS": "BS",
     "TOTAL_ASSETS": "BS",
     "ALLOWANCE_DOUBTFUL": "BS",

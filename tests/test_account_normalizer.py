@@ -41,6 +41,32 @@ def test_loss_qualifier_suffix_is_stripped_before_exact_match():
     assert operating_profit.mapping_confidence == 100.0
 
 
+def test_combined_tangible_assets_line_maps_to_its_own_code():
+    # DART's summary statement (fnlttSinglAcntAll) reports 유형자산 as one
+    # combined line, not broken into STRUCTURE/MACHINERY/CONSTRUCTION_IN_PROGRESS
+    # — narrative_patterns.py's fallback clusters rely on this being mapped.
+    result = normalize_account_name("유형자산")
+    assert result.canonical_account_code == "TANGIBLE_ASSETS"
+    assert result.mapping_method == MappingMethod.EXACT
+
+
+def test_noncurrent_borrowings_synonym_maps_to_lt_borrowings():
+    result = normalize_account_name("비유동성차입금")
+    assert result.canonical_account_code == "LT_BORROWINGS"
+    assert result.mapping_method == MappingMethod.ACCOUNT_DICTIONARY
+
+
+def test_current_borrowings_does_not_false_positive_as_lt_borrowings():
+    # "유동성차입금" (current/short-term portion) is a near-total substring
+    # of "비유동성차입금" (added above as LT_BORROWINGS' synonym for the
+    # long-term/non-current portion) — they mean opposite things but
+    # differ by only one leading character, and rapidfuzz's WRatio scores
+    # the pair ~92 (above the UI's >90.0 auto-accept line) despite that.
+    result = normalize_account_name("유동성차입금")
+    assert result.canonical_account_code is None
+    assert result.mapping_method == MappingMethod.UNRESOLVED
+
+
 def test_loss_qualifier_stripping_does_not_invent_matches_for_distinct_concepts():
     # "법인세비용차감전순이익" (profit before tax) is genuinely not the
     # same thing as net income — stripping "(손실)" must not promote it to

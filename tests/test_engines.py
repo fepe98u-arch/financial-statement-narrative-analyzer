@@ -55,6 +55,35 @@ def test_abc_manufacturing_triggers_production_expansion_narrative_pattern():
     assert "CAPEX_FINANCING" in patterns
 
 
+def test_tangible_assets_fallback_fires_when_granular_capex_accounts_are_absent():
+    # Real DART filings via the summary API (fnlttSinglAcntAll) report
+    # 유형자산 as one combined line, not broken into
+    # STRUCTURE/MACHINERY/CONSTRUCTION_IN_PROGRESS — a company imported that
+    # way (LG Energy Solution's actual situation) should still be able to
+    # trigger these two clusters using the coarser combined figure.
+    year_map = {
+        "INVENTORY": {2024: 100, 2025: 62},  # -38%, matches ABC's own numbers
+        "TANGIBLE_ASSETS": {2024: 100, 2025: 182},  # +82%
+        "LT_BORROWINGS": {2024: 100, 2025: 170},  # +70%
+    }
+    patterns = {hit.cluster_id for hit in detect_narrative_patterns(year_map, 2025, 2024)}
+    assert "PRODUCTION_EXPANSION" in patterns
+    assert "CAPEX_FINANCING" in patterns
+
+
+def test_tangible_assets_fallback_does_not_fire_from_partial_evidence():
+    # Only one of the two fallback accounts moving notably shouldn't be
+    # enough — CAPEX_FINANCING's fallback requires both TANGIBLE_ASSETS and
+    # LT_BORROWINGS to move, same as the granular version requiring
+    # multiple accounts to move together.
+    year_map = {
+        "TANGIBLE_ASSETS": {2024: 100, 2025: 182},  # +82%, moved
+        "LT_BORROWINGS": {2024: 100, 2025: 101},  # +1%, essentially flat
+    }
+    patterns = {hit.cluster_id for hit in detect_narrative_patterns(year_map, 2025, 2024)}
+    assert "CAPEX_FINANCING" not in patterns
+
+
 def test_sample_electronics_triggers_revenue_receivable_and_credit_risk():
     facts = load_financial_facts()
     year_map = to_year_map(facts, "Sample Electronics")
